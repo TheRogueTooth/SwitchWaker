@@ -51,7 +51,7 @@ const JointLink kTetra[] = {
 const JointLink kLaruto[] = {
     {"backbone", "chest_jnt"},     {"neck", "neck_jnt"},      {"head", "head_jnt"},   {"shoulderL", "Lshoulder_jnt"},
     {"armL1", "LarmA_jnt"},        {"armL2", "LarmB_jnt"},    {"handL", "cl_LhandA"}, {"shoulderR", "Rshoulder_jnt"},
-    {"armR1", "RarmA_jnt"},        {"armR2", "RarmB_jnt"},    {"handR", "cl_RhandA"}, {"waist", "waist_jnt"},
+    {"armR1", "RarmA_jnt"},        {"armR2", "RarmB_jnt"},    {"handR", "cl_RhandA"},
     {"legL2", "LlegA_jnt"},        {"footL", "Lfoot_jnt"},    {"legR2", "RlegA_jnt"}, {"footR", "Rfoot_jnt"},
     {NULL, NULL},
 };
@@ -71,7 +71,7 @@ const JointLink kMakar[] = {
     {"waist", "waist_jnt"},        {"legL", "LlegA_jnt"},         {"legR", "RlegA_jnt"},  {NULL, NULL},
 };
 const JointAttach kMedliAttach[] = {{"armLloc", "armL"}, {"armRloc", "armR"}, {NULL, NULL}};
-const JointAttach kMakarAttach[] = {{"world_root", "backbone"}, {NULL, NULL}};
+const JointAttach kMakarAttach[] = {{"face", "backbone"}, {NULL, NULL}};
 const JointAttach kAryllAttach[] = {{"ls_handL", "handL"}, {"ls_handR", "handR"}, {NULL, NULL}};
 
 struct CharDef {
@@ -89,6 +89,7 @@ struct CharDef {
     const char* hide;
     f32 itemScale;
     f32 radiusScale;
+    bool opaque; // authored see-through, as a spirit; drawn solid here
 };
 
 const CharDef kChars[COOP_CHAR_COUNT] = {
@@ -103,7 +104,7 @@ const CharDef kChars[COOP_CHAR_COUNT] = {
     {"Aryll", "Ls", "CcLs", "ls.bdl", "lshand.bdl", kAryllKomali, kAryllAttach, "handL", "handR", "backbone", "waist",
      NULL, 0.8f, 0.8f},
     {"Laruto", "Demo27", "CcZs", "zs.bdl", NULL, kLaruto, NULL, "handL", "handR", "backbone", "waist", "zs_harp", 1.25f,
-     1.1f},
+     1.1f, true},
 };
 
 const int kMaxJoints = 64;
@@ -252,20 +253,25 @@ bool addModel(CharInstance& inst, int m, J3DModelData* data) {
     return true;
 }
 
-// Rest poses of an attached joint and its children start at the body joint.
+// Locals come from each model's own hierarchy; then an attached joint starts at its body joint and
+// its children's rest poses follow it (the arm models are authored at the origin).
 void resolveRest(CharInstance& inst) {
+    for (int i = 0; i < inst.count; i++) {
+        CharJoint& joint = inst.joints[i];
+        if (joint.parent >= 0) {
+            Mtx inverse;
+            cMtx_inverse(inst.joints[joint.parent].rest, inverse);
+            cMtx_concat(inverse, joint.rest, joint.local);
+        } else {
+            cMtx_copy(joint.rest, joint.local);
+        }
+    }
     for (int i = 0; i < inst.count; i++) {
         CharJoint& joint = inst.joints[i];
         if (joint.attach >= 0) {
             cMtx_copy(inst.joints[joint.attach].rest, joint.rest);
-            MTXIdentity(joint.local);
         } else if (joint.parent >= 0) {
-            CharJoint& parent = inst.joints[joint.parent];
-            Mtx inverse;
-            cMtx_inverse(parent.rest, inverse);
-            cMtx_concat(inverse, joint.rest, joint.local);
-        } else {
-            cMtx_copy(joint.rest, joint.local);
+            cMtx_concat(inst.joints[joint.parent].rest, joint.local, joint.rest);
         }
     }
 }
@@ -429,6 +435,9 @@ bool createInstance(int slot, daPy_lk_c* player, int character) {
     }
     // The body's bounce scales with the height of the hips.
     inst.bodyScale = inst.joints[waist].rest[1][3] / linkRest[linkWaist][1][3];
+    if (inst.bodyScale > 1.0f) {
+        inst.bodyScale = 1.0f; // long robes and rigid legs: more bounce only sinks them into the floor
+    }
     // Hanging from a ledge or swimming, the hands stay where Link's are.
     inst.handDropY = linkRest[inst.linkHandL][1][3] - inst.joints[inst.handL].rest[1][3];
     if (def.hide != NULL) {
@@ -437,6 +446,18 @@ bool createInstance(int slot, daPy_lk_c* player, int character) {
             for (J3DMaterial* m = bodyData->getJointNodePointer(hide)->getMesh(); m != NULL; m = m->getNext()) {
                 m->getShape()->hide();
             }
+        }
+    }
+    // Damage-flash variants of the eyes and brows: the game only shows them in its own z-compare passes.
+    JUTNameTab* matNames = bodyData->getMaterialName();
+    for (u16 i = 0; i < bodyData->getMaterialNum(); i++) {
+        J3DMaterial* mat = bodyData->getMaterialNodePointer(i);
+        if (strstr(matNames->getName(i), "dam") != NULL) {
+            mat->getShape()->hide();
+        }
+        if (def.opaque) {
+            mat->setMaterialMode(1);
+            mat->getBlend()->setType(GX_BM_NONE);
         }
     }
     sFailed[slot] = 0;

@@ -315,19 +315,8 @@ cPhs_State daCoopP2_c::phase2(daCoopP2_c* i_this) {
 }
 
 cPhs_State daCoopP2_c::phase3(daCoopP2_c* i_this) {
-    cPhs_State state;
-    {
-        P2Window window(i_this);
-        state = i_this->makeBgWait();
-    }
-    if (state == cPhs_COMPLEATE_e) {
-        new (i_this->mAttentionStore) dAttention_c(i_this, 0); // inside the window the pads are exchanged
-        i_this->mAttentionMade = true;
-        sP2 = i_this;
-        fprintf(stderr, "[coop] player 2 is in the game\n");
-        toast("Player 2 is in the game");
-    }
-    return state;
+    P2Window window(i_this);
+    return i_this->makeBgWait();
 }
 
 cPhs_State daCoopP2_c::create() {
@@ -384,6 +373,13 @@ BOOL daCoopP2_c::execute() {
     fopAc_ac_c* link = dComIfGp_getLinkPlayer();
     if (link == NULL) {
         return TRUE;
+    }
+    if (sP2 != this) {
+        new (mAttentionStore) dAttention_c(this, 0); // inside the window the pads are exchanged
+        mAttentionMade = true;
+        sP2 = this;
+        fprintf(stderr, "[coop] player 2 is in the game\n");
+        toast("Player 2 is in the game");
     }
     if (parked()) {
         mWasParked = true;
