@@ -1639,7 +1639,11 @@ void daPy_lk_c::drawShadow() {
         } else {
             f1 = m_HIO->mBasic.m.field_0x10;
         }
+#if COS_WITH_COUCH_COOP
+        mShadowId = dComIfGd_setShadow(mShadowId, 0, coop_charShadowModel(this, mpCLModel), &root_jnt_pos, f1, 30.0f, current.pos.y,
+#else
         mShadowId = dComIfGd_setShadow(mShadowId, 0, mpCLModel, &root_jnt_pos, f1, 30.0f, current.pos.y,
+#endif
                                        f31, mAcch.m_gnd, &tevStr, 0, 1.0f,
                                        &dDlst_shadowControl_c::mSimpleTexObj);
         if (mShadowId != 0) {
@@ -1815,6 +1819,11 @@ BOOL daPy_lk_c::draw() {
     j3dSys.getModel()->unlock();
     
     BOOL r24 = field_0x2b0 <= -85.0f;
+#if COS_WITH_COUCH_COOP
+    if (coop_charDraw(this, r24 != FALSE)) {
+        goto coopBodyDrawn;
+    }
+#endif
     if (r24) {
         for (int i = 0; i < ARRAY_SIZE(mpZOffBlendShape); i++) {
             mpZOffBlendShape[i]->hide();
@@ -1973,6 +1982,9 @@ BOOL daPy_lk_c::draw() {
         entryDLSetLight(mpHbootsModels[1], checkFreezeState());
     }
     
+#if COS_WITH_COUCH_COOP
+coopBodyDrawn:
+#endif
     tevStr.mFogColor.r = origFog.r;
     tevStr.mFogColor.g = origFog.g;
     tevStr.mFogColor.b = origFog.b;
@@ -9836,6 +9848,9 @@ void daPy_lk_c::setCollision() {
         }
         mCyl.SetH(40.1f + (mpCLModel->getAnmMtx(CL_JNT_NECK_JNT_e)[1][3] - spD0.y));
     }
+#if COS_WITH_COUCH_COOP
+    mCyl.SetR(mCyl.GetR() * coop_charRadiusScale(this));
+#endif
     mCyl.SetC(spD0);
     if (checkModeFlg(ModeFlg_DAMAGE) || checkGuardSlip() || mCurProc == daPyProc_VOMIT_WAIT_e || mDamageWaitTimer != 0)
     {
@@ -10758,6 +10773,9 @@ void daPy_lk_c::setBgCheckParam() {
     } else {
         mAcchCir[0].SetWallR(35.0f);
     }
+#if COS_WITH_COUCH_COOP
+    mAcchCir[0].SetWallR(mAcchCir[0].GetWallR() * coop_charRadiusScale(this));
+#endif
     
     mAcchCir[1].SetWallR(mAcchCir[0].GetWallR());
     mAcchCir[2].SetWallR(mAcchCir[0].GetWallR());
@@ -11635,6 +11653,9 @@ BOOL daPy_lk_c::execute() {
     static const Vec head_offset = {40.0f, 0.0f, 0.0f};
     
     mpCLModel->calc();
+#if COS_WITH_COUCH_COOP
+    coop_charAfterCalc(this);
+#endif
     cMtx_multVec(mpCLModel->getAnmMtx(CL_JNT_HEAD_JNT_e), &head_offset, &mHeadTopPos);
     checkRoofRestart();
     mDoMtx_multVecZero(mpCLModel->getAnmMtx(CL_JNT_CL_LHANDA_e), &mLeftHandPos);
@@ -11792,6 +11813,9 @@ static BOOL daPy_IsDelete(daPy_lk_c*) {
 
 /* 80122D58-80123058       .text playerDelete__9daPy_lk_cFv */
 BOOL daPy_lk_c::playerDelete() {
+#if COS_WITH_COUCH_COOP
+    coop_charOnPlayerDelete(this);
+#endif
     int i;
     for (i = 0; i < ARRAY_SSIZE(mFootEffect); i++) {
         mFootEffect[i].getSmokeCallBack()->remove();

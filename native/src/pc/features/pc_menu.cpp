@@ -34,6 +34,7 @@
 // script and checks the "#expect" lines of the script file (see smokeParse below): the menu opened,
 // the game stayed paused while it was open, the settings in effect, the lines of the settings file,
 // the EFB size, the stage after a warp; exit 0 at the "#expect end" frame when all held.
+#include "mods/couch_coop.h"
 #include "pc/pc_settings.h"
 #include "pc/pc_dynres.h"
 #include "pc/pc_gpu_opts.h"
@@ -2595,6 +2596,9 @@ void menuFrame() {
     } else {
         handleInput(keys);
     }
+#if COS_WITH_COUCH_COOP
+    coop_uiFrame();
+#endif
     drawNotice();
     if (m.popup) {
         drawPopup();

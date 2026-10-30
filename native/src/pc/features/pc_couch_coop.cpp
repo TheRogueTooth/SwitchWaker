@@ -6,6 +6,9 @@
 // puppet Link of ww-online's Seaborne (MIT, datstarkey): own copy of Link.arc, own eye and brow
 // packets, kept position. That puppet mirrors a remote game; this one runs the stock procs.
 //
+// Controls: + on controller 2 opens player 2's picker and joins them. ZL + ZR + Plus on either
+// controller opens that player's picker. Up and down choose, A confirms, B cancels.
+//
 // Rules of this first stage: only player 1 starts events and changes the stage. Player 2 freezes
 // during events, is hidden while player 1 sails or is dead, and warps to player 1 when lost.
 #include "d/dolzel.h" // IWYU pragma: keep
@@ -18,6 +21,8 @@
 #include "f_pc/f_pc_manager.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "mods/couch_coop.h"
+
+#include <imgui.h>
 
 #include <cstdio>
 #include <cstring>
@@ -71,6 +76,51 @@ fpc_ProcID sP2Id = fpcM_ERROR_PROCESS_ID_e;
 bool sJoined = false;
 int sInPlayFrames = 0;
 int sRetryFrames = 0;
+int sPicker[2] = {-1, -1}; // the highlighted character, or -1 when closed
+int sPickerStick[2] = {0, 0};
+bool sPlayMessageShown = false;
+bool sPad2Connected = false;
+char sToast[128] = "";
+int sToastFrames = 0;
+
+void toast(const char* text, int frames = 240) {
+    snprintf(sToast, sizeof(sToast), "%s", text);
+    sToastFrames = frames;
+}
+
+// The picker takes this player's controller while it is open. Returns once a choice is made.
+void pickerInput(int slot) {
+    interface_of_controller_pad& pad = g_mDoCPd_cpadInfo[slot];
+    int move = 0;
+    if (pad.mButtonTrig.up) {
+        move = -1;
+    } else if (pad.mButtonTrig.down) {
+        move = 1;
+    }
+    const int stick = pad.mMainStickPosY > 0.6f ? -1 : pad.mMainStickPosY < -0.6f ? 1 : 0;
+    if (stick != sPickerStick[slot]) {
+        sPickerStick[slot] = stick;
+        if (stick != 0) {
+            move = stick;
+        }
+    }
+    sPicker[slot] = (sPicker[slot] + move + COOP_CHAR_COUNT) % COOP_CHAR_COUNT;
+    if (pad.mButtonTrig.a) {
+        coop_charRequest(slot, sPicker[slot]);
+        char text[64];
+        snprintf(text, sizeof(text), "Player %d is %s", slot + 1, coop_charName(sPicker[slot]));
+        toast(text);
+        sPicker[slot] = -1;
+    } else if (pad.mButtonTrig.b) {
+        sPicker[slot] = -1;
+    }
+    memset(&pad.mButtonHold, 0, sizeof(pad.mButtonHold));
+    memset(&pad.mButtonTrig, 0, sizeof(pad.mButtonTrig));
+    pad.mMainStickPosX = pad.mMainStickPosY = pad.mMainStickValue = 0.0f;
+    pad.mCStickPosX = pad.mCStickPosY = pad.mCStickValue = 0.0f;
+    pad.mTriggerLeft = pad.mTriggerRight = 0.0f;
+    pad.mHoldLockL = pad.mTrigLockL = pad.mHoldLockR = pad.mTrigLockR = 0;
+}
 
 bool isLinkP2(const fopAc_ac_c* actor) {
     return actor != NULL && actor == sP2;
@@ -275,6 +325,7 @@ cPhs_State daCoopP2_c::phase3(daCoopP2_c* i_this) {
         i_this->mAttentionMade = true;
         sP2 = i_this;
         fprintf(stderr, "[coop] player 2 is in the game\n");
+        toast("Player 2 is in the game");
     }
     return state;
 }
@@ -326,6 +377,7 @@ void daCoopP2_c::warpToP1() {
     P2Window window(this);
     procWait_init();
     fprintf(stderr, "[coop] player 2 warped to player 1\n");
+    toast("Player 2 warped back", 90);
 }
 
 BOOL daCoopP2_c::execute() {
@@ -431,16 +483,90 @@ actor_process_profile_definition g_profile_COOP_P2 = {
     /* Cull Type    */ fopAc_CULLBOX_0_e,
 };
 
+void coop_uiFrame() {
+    ImGuiIO& io = ImGui::GetIO();
+    const float scale = io.DisplaySize.y / 720.0f * 1.5f;
+    constexpr ImGuiWindowFlags kFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
+                                        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove |
+                                        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_AlwaysAutoResize;
+    if (sToastFrames > 0) {
+        sToastFrames--;
+        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.06f), ImGuiCond_Always,
+                                ImVec2(0.5f, 0.0f));
+        ImGui::SetNextWindowBgAlpha(0.75f);
+        if (ImGui::Begin("##coop_toast", nullptr, kFlags)) {
+            ImGui::SetWindowFontScale(scale);
+            ImGui::TextUnformatted(sToast);
+        }
+        ImGui::End();
+    }
+    for (int slot = 0; slot < 2; slot++) {
+        if (sPicker[slot] < 0) {
+            continue;
+        }
+        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * (slot == 0 ? 0.25f : 0.75f), io.DisplaySize.y * 0.5f),
+                                ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowBgAlpha(0.88f);
+        char id[32];
+        snprintf(id, sizeof(id), "##coop_picker%d", slot);
+        if (ImGui::Begin(id, nullptr, kFlags)) {
+            ImGui::SetWindowFontScale(scale);
+            ImGui::Text("Player %d: pick a character", slot + 1);
+            ImGui::Separator();
+            for (int i = 0; i < COOP_CHAR_COUNT; i++) {
+                const bool on = i == sPicker[slot];
+                ImGui::TextColored(on ? ImVec4(1.0f, 0.85f, 0.2f, 1.0f) : ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "%s %s",
+                                   on ? ">" : " ", coop_charName(i));
+            }
+            ImGui::Separator();
+            ImGui::TextUnformatted("A: choose   B: cancel");
+        }
+        ImGui::End();
+    }
+}
+
 void coop_frame() {
-    if (!sJoined && g_mDoCPd_cpadInfo[1].mButtonTrig.start) {
-        sJoined = true;
-        fprintf(stderr, "[coop] player 2 joined\n");
+    const bool pad2 = g_mDoCPd_cpadInfo[1].mGamepadErrorFlags == 0;
+    if (pad2 != sPad2Connected) {
+        sPad2Connected = pad2;
+        fprintf(stderr, "[coop] controller 2 %s\n", pad2 ? "found" : "gone");
+        if (pad2 && !sJoined) {
+            toast("Controller 2 found: press + on it to join");
+        }
     }
     fopAc_ac_c* link = dComIfGp_getLinkPlayer();
     const char* stage = dComIfGp_getStartStageName();
     const bool inPlay = link != NULL && stage[0] != '\0' && strcmp(stage, "sea_T") != 0 && strcmp(stage, "Name") != 0 &&
                         !dComIfGp_isEnableNextStage() && !dComIfGp_event_runCheck();
     sInPlayFrames = inPlay ? sInPlayFrames + 1 : 0;
+    if (sInPlayFrames == kSettleFrames && !sPlayMessageShown) {
+        sPlayMessageShown = true;
+        toast(sPad2Connected ? "Co-op: + on controller 2 joins. ZL+ZR+Plus: change character"
+                             : "Co-op: connect controller 2 to add a player. ZL+ZR+Plus: change character",
+              360);
+    }
+    for (int slot = 0; slot < 2; slot++) {
+        if (sPicker[slot] >= 0) {
+            if (inPlay) {
+                pickerInput(slot);
+            } else {
+                sPicker[slot] = -1;
+            }
+            continue;
+        }
+        interface_of_controller_pad& pad = g_mDoCPd_cpadInfo[slot];
+        const bool combo = pad.mButtonTrig.start && pad.mHoldLockL && pad.mHoldLockR;
+        if (sInPlayFrames >= kSettleFrames && (combo || (slot == 1 && pad.mButtonTrig.start))) {
+            if (slot == 1 && !sJoined) {
+                sJoined = true;
+                fprintf(stderr, "[coop] player 2 joined\n");
+            }
+            sPicker[slot] = coop_charWanted(slot);
+            pad.mButtonTrig.start = 0;
+            pad.mButtonHold.start = 0;
+            fprintf(stderr, "[coop] picker open for player %d\n", slot + 1);
+        }
+    }
 
     if (sP2Id != fpcM_ERROR_PROCESS_ID_e) {
         if (sP2 == NULL && !fpcM_IsCreating(sP2Id)) {

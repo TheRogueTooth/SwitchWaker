@@ -429,6 +429,7 @@ void daPy_swapDebugKeep(cXyz* pos, csXyz* shapeAngle, csXyz* currentAngle);
 class daPy_lk_c : public daPy_py_c {
 #if TARGET_PC
     friend class daCoopP2_c; // couch co-op's player 2 (native/src/pc/features/pc_couch_coop.cpp)
+    friend struct CoopCharLink; // couch co-op's characters (native/src/pc/features/pc_couch_coop_char.cpp)
 #endif
 public:
     enum daPy_PROC {
