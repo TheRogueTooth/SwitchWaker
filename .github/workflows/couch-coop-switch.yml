@@ -30,8 +30,17 @@ jobs:
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - name: Keep unchanged sources older than their objects
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq git-restore-mtime
-          git restore-mtime --quiet
+          git log --format='%at' --name-only | python3 -c "
+          import os, sys
+          seen, when = set(), 0
+          for line in map(str.strip, sys.stdin):
+              if line.isdigit() and not os.path.exists(line):
+                  when = int(line)
+              elif line and line not in seen:
+                  seen.add(line)
+                  if os.path.exists(line):
+                      os.utime(line, (when, when))
+          "
       - uses: docker/setup-buildx-action@v3
       - name: Build image
         uses: docker/build-push-action@v6
