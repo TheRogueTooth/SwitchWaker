@@ -518,6 +518,9 @@ process_profile_definition* g_fpcPfLst_ProfileList[] = {
     &g_profile_SCP.base.base,
     &g_profile_PB.base.base,
     &g_profile_GAMEOVER.base.base,
+#if COS_WITH_COUCH_COOP
+    &g_profile_COOP_P2.base.base,
+#endif
     NULL,
 };
 

@@ -30,6 +30,7 @@
 #if TARGET_PC
 #include "pc/pc_harness.h"
 #endif
+#include "mods/couch_coop.h"
 #if TARGET_PC
 // From Dusklight (CC0, ref/dusklight/src/dusk/main.cpp): Aurora's aurora::main library owns the
 // process entry point; <aurora/main.h> renames the game's main below to aurora_main, which it
@@ -499,6 +500,9 @@ void main01() {
         pc_perf_begin(PC_PERF_AUD_EXECUTE);
         mDoAud_Execute();  // handle audio execution
         pc_perf_end(PC_PERF_AUD_EXECUTE);
+#if COS_WITH_COUCH_COOP
+        coop_frame();
+#endif
         pc_perf_begin(PC_PERF_GAME);
         fapGm_Execute();   // handle game execution
         pc_perf_end(PC_PERF_GAME);

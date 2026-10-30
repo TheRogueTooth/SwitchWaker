@@ -35,6 +35,10 @@ s32 dEvt_control_c::orderOld(u16 eventType, u16 priority, u16 flag, u16 hindFlag
 
 /* 8006FEE8-8007002C       .text order__14dEvt_control_cFUsUsUsUsPvPvsUc */
 s32 dEvt_control_c::order(u16 eventType, u16 priority, u16 flag, u16 hindFlag, void* ac1, void* ac2, s16 eventIdx, u8 eventInfoIdx) {
+#if COS_WITH_COUCH_COOP
+    if (g_coopInP2)
+        return FALSE;
+#endif
     if (mOrderCount >= 8)
         return FALSE;
 
@@ -672,6 +676,10 @@ s32 dEvt_control_c::moveApproval(void* actor) {
 
 /* 80071418-80071468       .text compulsory__14dEvt_control_cFPvPCcUs */
 BOOL dEvt_control_c::compulsory(void* actor, const char* eventName, u16 p3) {
+#if COS_WITH_COUCH_COOP
+    if (g_coopInP2)
+        return FALSE;
+#endif
     if (getMode() != dEvtMode_NONE_e)
         return FALSE;
 

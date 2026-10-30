@@ -152,7 +152,11 @@ int mDoCPd_Create() {
 
     JUTGamePad* pad = new JUTGamePad(JUTGamePad::EPort1);
     g_mDoCPd_gamePad[0] = pad;
+#if COS_WITH_COUCH_COOP
+    g_mDoCPd_gamePad[1] = new JUTGamePad(JUTGamePad::EPort2);
+#else
     g_mDoCPd_gamePad[1] = NULL;
+#endif
 
 #if VERSION == VERSION_DEMO
     g_mDoCPd_gamePad[2] = new JUTGamePad(JUTGamePad::EPort3);

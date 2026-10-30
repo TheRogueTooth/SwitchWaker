@@ -163,6 +163,9 @@ s32 fopAc_Draw(void* pProc) {
 /* 8002362C-80023BDC       .text fopAc_Execute__FPv */
 BOOL fopAc_Execute(void* pProc) {
     fopAc_ac_c * actor = (fopAc_ac_c *)pProc;
+#if COS_WITH_COUCH_COOP
+    CoopActorScope coopScope(actor);
+#endif
     BOOL ret = TRUE;
 
 #if VERSION > VERSION_DEMO

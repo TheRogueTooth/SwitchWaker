@@ -10,6 +10,8 @@
 
 #include "d/dolzel.h" // IWYU pragma: keep
 #include "d/actor/d_a_player_main.h"
+#include "mods/couch_coop.h"
+#include <utility>
 #include "d/actor/d_a_demo_item.h"
 #include "d/actor/d_a_npc_fa1.h"
 #include "d/actor/d_a_obj_movebox.h"
@@ -57,6 +59,14 @@ static JGeometry::TVec3<f32> l_hammer_splash_particle_scale(0.67f, 0.67f, 0.67f)
 static cXyz l_debug_keep_pos;
 static csXyz l_debug_current_angle;
 static csXyz l_debug_shape_angle;
+#endif
+
+#if TARGET_PC && VERSION > VERSION_DEMO
+void daPy_swapDebugKeep(cXyz* pos, csXyz* shapeAngle, csXyz* currentAngle) {
+    std::swap(l_debug_keep_pos, *pos);
+    std::swap(l_debug_shape_angle, *shapeAngle);
+    std::swap(l_debug_current_angle, *currentAngle);
+}
 #endif
 
 static GXColor l_freeze_fade_color = {0xFF, 0xFF, 0xFF, 0xFF};
@@ -568,10 +578,21 @@ static BOOL daPy_jointCallback1(J3DNode* node, int calcTiming) {
     return TRUE;
 }
 
+#if TARGET_PC
+// A packet entered twice in a draw list makes the list cyclic: a second Link drawn in the same
+// frame points daPy_cupPackets at its own set around its draw.
+static daPy_cupPackets_c l_cupPackets;
+daPy_cupPackets_c* daPy_cupPackets = &l_cupPackets;
+#define l_offCupOnAupPacket1 (daPy_cupPackets->mOffCupOnAup1)
+#define l_offCupOnAupPacket2 (daPy_cupPackets->mOffCupOnAup2)
+#define l_onCupOffAupPacket1 (daPy_cupPackets->mOnCupOffAup1)
+#define l_onCupOffAupPacket2 (daPy_cupPackets->mOnCupOffAup2)
+#else
 static mDoExt_offCupOnAupPacket l_offCupOnAupPacket1;
 static mDoExt_offCupOnAupPacket l_offCupOnAupPacket2;
 static mDoExt_onCupOffAupPacket l_onCupOffAupPacket1;
 static mDoExt_onCupOffAupPacket l_onCupOffAupPacket2;
+#endif
 
 /* 801041B4-801041EC       .text setAnimeHeap__9daPy_lk_cFP12JKRSolidHeap */
 JKRHeap* daPy_lk_c::setAnimeHeap(JKRSolidHeap* animeHeap) {
@@ -10879,6 +10900,11 @@ void daPy_lk_c::checkFallCode() {
 
 /* 80120724-80120BBC       .text startRestartRoom__9daPy_lk_cFUlifi */
 BOOL daPy_lk_c::startRestartRoom(u32 mode, int eventInfoIdx, f32 param_3, int i_point) {
+#if COS_WITH_COUCH_COOP
+    if (coop_restartInstead(this)) {
+        return TRUE;
+    }
+#endif
     if (!checkNoResetFlg0(daPyFlg0_UNK4000) && (i_point != 0 || dComIfGp_event_compulsory(this))) {
         mDemo.setOriginalDemoType();
         if (i_point == 0) {

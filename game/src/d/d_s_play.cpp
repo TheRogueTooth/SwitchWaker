@@ -393,6 +393,9 @@ static BOOL dScnPly_Draw(dScnPly_ply_c* i_this) {
         dComIfG_Ccsp()->Draw();
         dSnap_DebugDraw();
         dComIfGp_getAttention().Draw();
+#if COS_WITH_COUCH_COOP
+        coop_drawAttention();
+#endif
         dComIfGp_map_mapBufferSendAGB(3);
     }
 

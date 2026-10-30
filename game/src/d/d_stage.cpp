@@ -2354,6 +2354,11 @@ void dStage_roomControl_c::SetTimePass(int i_timepass) {
 
 /* 8004360C-80043900       .text dStage_changeSceneExitId__FR13cBgS_PolyInfofUlSc */
 int dStage_changeSceneExitId(cBgS_PolyInfo& i_poly, f32 i_speed, u32 i_mode, s8 i_roomNo) {
+#if COS_WITH_COUCH_COOP
+    if (g_coopInP2) {
+        return 0;
+    }
+#endif
     int exit_id = dComIfG_Bgsp()->GetExitId(i_poly);
     if (exit_id == 0x3E || exit_id == 0x3B) {
         fopAc_ac_c* actor_p = dComIfG_Bgsp()->GetActorPointer(i_poly);
@@ -2399,6 +2404,11 @@ int dStage_changeSceneExitId(cBgS_PolyInfo& i_poly, f32 i_speed, u32 i_mode, s8 
 
 /* 80043900-80043AA8       .text dStage_changeScene__FifUlSc */
 int dStage_changeScene(int i_exitId, f32 speed, u32 mode, s8 room_no) {
+#if COS_WITH_COUCH_COOP
+    if (g_coopInP2) {
+        return 0;
+    }
+#endif
     stage_scls_info_dummy_class* scls;
 
     if (room_no == -1) {

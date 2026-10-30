@@ -2,6 +2,7 @@
 #define D_COM_D_COM_INF_GAME_H
 
 #include "d/d_attention.h"
+#include "mods/couch_coop.h"
 #include "d/d_bg_s.h"
 #include "d/d_cc_s.h"
 #include "d/d_detect.h"
@@ -271,7 +272,11 @@ public:
     dEvent_manager_c& getEvtManager() { return mEvtManager; }
     dPa_control_c* getParticle() { return mParticle; }
     dVibration_c& getVibration() { return mVibration; }
+#if COS_WITH_COUCH_COOP
+    dAttention_c& getAttention() { return g_coopAttention != NULL ? *g_coopAttention : mAttention; }
+#else
     dAttention_c& getAttention() { return mAttention; }
+#endif
     dDetect_c& getDetect() { return mDetect; }
     dDemo_manager_c* getDemo() { return mDemo; }
     camera_class* getCamera(int idx) { return mCameraInfo[idx].mpCamera; }
@@ -299,6 +304,11 @@ public:
     bool isEnableNextStage() { return mNextStage.isEnable(); }
     void offEnableNextStage() { mNextStage.offEnable(); }
     void setNextStage(const char* i_stageName, s8 i_roomNo, s16 i_point, s8 i_layer, s8 i_wipe) {
+#if COS_WITH_COUCH_COOP
+        if (g_coopInP2) {
+            return;
+        }
+#endif
         mNextStage.set(i_stageName, i_roomNo, i_point, i_layer, i_wipe);
     }
 

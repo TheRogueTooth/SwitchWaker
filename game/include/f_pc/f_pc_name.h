@@ -517,6 +517,9 @@ enum {
     /* 0x01F3 */ fpcNm_SCP_e,
     /* 0x01F4 */ fpcNm_PB_e,
     /* 0x01F5 */ fpcNm_GAMEOVER_e,
+#if COS_WITH_COUCH_COOP
+    /* 0x01F6 */ fpcNm_COOP_P2_e,
+#endif
     fpcNm_MAX_NUM_e,
 
     fpcNm_INVALID_e = 0x7FFF,

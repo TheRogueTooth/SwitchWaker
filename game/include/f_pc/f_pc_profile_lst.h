@@ -513,6 +513,9 @@ extern process_profile_definition g_profile_OPERATE_WIND;
 extern process_profile_definition g_profile_SCP;
 extern process_profile_definition g_profile_PB;
 extern process_profile_definition g_profile_GAMEOVER;
+#if COS_WITH_COUCH_COOP
+extern actor_process_profile_definition g_profile_COOP_P2; // native/src/pc/features/pc_couch_coop.cpp
+#endif
 #endif
 
 extern process_profile_definition* g_fpcPfLst_ProfileList[];

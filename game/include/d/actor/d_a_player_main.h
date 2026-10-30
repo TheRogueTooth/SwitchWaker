@@ -413,7 +413,23 @@ public:
     u8 pad[0x3F - 0x22];
 };  // Size: 0x3F
 
+#if TARGET_PC
+// The eye and brow z-compare packets daPy_lk_c::draw enters; one set per Link drawn.
+struct daPy_cupPackets_c {
+    mDoExt_offCupOnAupPacket mOffCupOnAup1;
+    mDoExt_offCupOnAupPacket mOffCupOnAup2;
+    mDoExt_onCupOffAupPacket mOnCupOffAup1;
+    mDoExt_onCupOffAupPacket mOnCupOffAup2;
+};
+extern daPy_cupPackets_c* daPy_cupPackets;
+// Exchanges the position, shape angle and angle the player's execute restores.
+void daPy_swapDebugKeep(cXyz* pos, csXyz* shapeAngle, csXyz* currentAngle);
+#endif
+
 class daPy_lk_c : public daPy_py_c {
+#if TARGET_PC
+    friend class daCoopP2_c; // couch co-op's player 2 (native/src/pc/features/pc_couch_coop.cpp)
+#endif
 public:
     enum daPy_PROC {
         daPyProc_SCOPE_e = 0x00,

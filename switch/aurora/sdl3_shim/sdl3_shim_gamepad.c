@@ -21,6 +21,7 @@
 #include "sdl3_shim.h"
 
 #define INSTANCE_ID 1
+#define INSTANCE_ID_P2 2
 #define SWITCH_PAD_VENDOR_ID 0x057e
 #define PRODUCT_PRO_CONTROLLER 0x2009
 
@@ -30,6 +31,12 @@ struct SDL_Gamepad {
 };
 
 static struct SDL_Gamepad g_gamepad = {.player_index = 0};
+// Couch co-op: player 2's controller (a Pro Controller or paired Joy-Cons), instance 2, port 2.
+static struct SDL_Gamepad g_gamepad2 = {.player_index = 1};
+static bool g_connected2;
+static PadState g_pad2;
+static u64 g_buttons2;
+static HidAnalogStickState g_sticks2[2];
 static bool g_initialized;
 static bool g_connected;
 static bool g_open;
@@ -84,8 +91,9 @@ static const struct {
 void sdl3_shim_gamepad_init(void) {
     if (g_initialized)
         return;
-    padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+    padConfigureInput(2, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&g_pad);
+    padInitialize(&g_pad2, HidNpadIdType_No2);
     static const struct {
         HidNpadIdType id;
         HidNpadStyleTag style;
@@ -117,6 +125,9 @@ void sdl3_shim_gamepad_init(void) {
                                                    kMotion[i].style)))
             g_motion_count[i] = kMotion[i].handles;
     }
+    g_gamepad2.properties = SDL_CreateProperties();
+    SDL_SetBooleanProperty(g_gamepad2.properties, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
+    SDL_SetBooleanProperty(g_gamepad2.properties, SDL_PROP_GAMEPAD_CAP_RGB_LED_BOOLEAN, false);
     g_gamepad.properties = SDL_CreateProperties();
     SDL_SetBooleanProperty(g_gamepad.properties, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, rumble);
     SDL_SetBooleanProperty(g_gamepad.properties, SDL_PROP_GAMEPAD_CAP_RGB_LED_BOOLEAN, false);
@@ -156,13 +167,13 @@ static void sample_motion(void) {
     g_accel[2] = state.acceleration.y * SDL_STANDARD_GRAVITY;
 }
 
-static void queue_device_event(Uint32 type) {
+static void queue_device_event(Uint32 type, SDL_JoystickID which) {
     SDL_Event event;
     memset(&event, 0, sizeof event);
     event.type = type;
     event.gdevice.type = type;
     event.gdevice.timestamp = SDL_GetTicks() * 1000000ULL;
-    event.gdevice.which = INSTANCE_ID;
+    event.gdevice.which = which;
     sdl3_shim_queue_event(&event);
 }
 
@@ -214,11 +225,25 @@ void sdl3_shim_gamepad_pump(void) {
     }
     if (connected != g_connected) {
         g_connected = connected;
-        queue_device_event(connected ? SDL_EVENT_GAMEPAD_ADDED : SDL_EVENT_GAMEPAD_REMOVED);
+        queue_device_event(connected ? SDL_EVENT_GAMEPAD_ADDED : SDL_EVENT_GAMEPAD_REMOVED, INSTANCE_ID);
+    }
+    padUpdate(&g_pad2);
+    const bool attached2 = padIsConnected(&g_pad2);
+    mutexLock(&g_lock);
+    g_buttons2 = attached2 ? padGetButtons(&g_pad2) : 0;
+    g_sticks2[0] = padGetStickPos(&g_pad2, 0);
+    g_sticks2[1] = padGetStickPos(&g_pad2, 1);
+    mutexUnlock(&g_lock);
+    if (attached2 != g_connected2) {
+        g_connected2 = attached2;
+        fprintf(stderr, "[switch] controller %s (player 2)\n", attached2 ? "connected" : "not connected");
+        queue_device_event(attached2 ? SDL_EVENT_GAMEPAD_ADDED : SDL_EVENT_GAMEPAD_REMOVED, INSTANCE_ID_P2);
     }
 }
 
 SDL_Gamepad* SDL_OpenGamepad(SDL_JoystickID instance_id) {
+    if (instance_id == INSTANCE_ID_P2 && g_connected2)
+        return &g_gamepad2;
     if (instance_id != INSTANCE_ID || !g_connected) {
         sdl3_shim_set_error("no such gamepad");
         return NULL;
@@ -233,10 +258,10 @@ void SDL_CloseGamepad(SDL_Gamepad* gamepad) {
 }
 
 bool SDL_GetGamepadButton(SDL_Gamepad* gamepad, SDL_GamepadButton button) {
-    if (gamepad != &g_gamepad)
+    if (gamepad != &g_gamepad && gamepad != &g_gamepad2)
         return false;
     mutexLock(&g_lock);
-    const u64 buttons = g_buttons;
+    const u64 buttons = gamepad == &g_gamepad2 ? g_buttons2 : g_buttons;
     mutexUnlock(&g_lock);
     for (size_t i = 0; i < sizeof kButtons / sizeof kButtons[0]; ++i) {
         if (kButtons[i].button == button)
@@ -257,12 +282,13 @@ static Sint16 stick_axis(s32 value, bool invert) {
 }
 
 Sint16 SDL_GetGamepadAxis(SDL_Gamepad* gamepad, SDL_GamepadAxis axis) {
-    if (gamepad != &g_gamepad)
+    if (gamepad != &g_gamepad && gamepad != &g_gamepad2)
         return 0;
+    const bool p2 = gamepad == &g_gamepad2;
     mutexLock(&g_lock);
-    const u64 buttons = g_buttons;
-    const HidAnalogStickState left = g_sticks[0];
-    const HidAnalogStickState right = g_sticks[1];
+    const u64 buttons = p2 ? g_buttons2 : g_buttons;
+    const HidAnalogStickState left = p2 ? g_sticks2[0] : g_sticks[0];
+    const HidAnalogStickState right = p2 ? g_sticks2[1] : g_sticks[1];
     mutexUnlock(&g_lock);
     switch (axis) {
     case SDL_GAMEPAD_AXIS_LEFTX: return stick_axis(left.x, false);
@@ -279,44 +305,44 @@ Sint16 SDL_GetGamepadAxis(SDL_Gamepad* gamepad, SDL_GamepadAxis axis) {
 }
 
 SDL_JoystickID SDL_GetGamepadID(SDL_Gamepad* gamepad) {
-    return gamepad == &g_gamepad ? INSTANCE_ID : 0;
+    return gamepad == &g_gamepad ? INSTANCE_ID : gamepad == &g_gamepad2 ? INSTANCE_ID_P2 : 0;
 }
 
 // The gamepad is its own joystick handle.
 SDL_Joystick* SDL_GetGamepadJoystick(SDL_Gamepad* gamepad) { return (SDL_Joystick*)gamepad; }
 
 SDL_JoystickID SDL_GetJoystickID(SDL_Joystick* joystick) {
-    return (void*)joystick == (void*)&g_gamepad ? INSTANCE_ID : 0;
+    return (void*)joystick == (void*)&g_gamepad ? INSTANCE_ID : (void*)joystick == (void*)&g_gamepad2 ? INSTANCE_ID_P2 : 0;
 }
 
 const char* SDL_GetGamepadName(SDL_Gamepad* gamepad) {
-    return gamepad == &g_gamepad ? "Switch Controller" : NULL;
+    return gamepad == &g_gamepad || gamepad == &g_gamepad2 ? "Switch Controller" : NULL;
 }
 
 Uint16 SDL_GetGamepadVendor(SDL_Gamepad* gamepad) {
-    return gamepad == &g_gamepad ? SWITCH_PAD_VENDOR_ID : 0;
+    return gamepad == &g_gamepad || gamepad == &g_gamepad2 ? SWITCH_PAD_VENDOR_ID : 0;
 }
 
 Uint16 SDL_GetGamepadProduct(SDL_Gamepad* gamepad) {
-    return gamepad == &g_gamepad ? PRODUCT_PRO_CONTROLLER : 0;
+    return gamepad == &g_gamepad || gamepad == &g_gamepad2 ? PRODUCT_PRO_CONTROLLER : 0;
 }
 
 SDL_GamepadType SDL_GetGamepadType(SDL_Gamepad* gamepad) {
-    return gamepad == &g_gamepad ? SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO : SDL_GAMEPAD_TYPE_UNKNOWN;
+    return gamepad == &g_gamepad || gamepad == &g_gamepad2 ? SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO : SDL_GAMEPAD_TYPE_UNKNOWN;
 }
 
 SDL_PropertiesID SDL_GetGamepadProperties(SDL_Gamepad* gamepad) {
-    return gamepad == &g_gamepad ? g_gamepad.properties : 0;
+    return gamepad == &g_gamepad ? g_gamepad.properties : gamepad == &g_gamepad2 ? g_gamepad2.properties : 0;
 }
 
 int SDL_GetGamepadPlayerIndex(SDL_Gamepad* gamepad) {
-    return gamepad == &g_gamepad ? g_gamepad.player_index : -1;
+    return gamepad == &g_gamepad || gamepad == &g_gamepad2 ? gamepad->player_index : -1;
 }
 
 bool SDL_SetGamepadPlayerIndex(SDL_Gamepad* gamepad, int player_index) {
-    if (gamepad != &g_gamepad)
+    if (gamepad != &g_gamepad && gamepad != &g_gamepad2)
         return false;
-    g_gamepad.player_index = player_index;
+    gamepad->player_index = player_index;
     return true;
 }
 
@@ -340,7 +366,7 @@ SDL_PowerState SDL_GetJoystickPowerInfo(SDL_Joystick* joystick, int* percent) {
 SDL_GUID SDL_GetGamepadGUIDForID(SDL_JoystickID instance_id) {
     SDL_GUID guid;
     memset(&guid, 0, sizeof guid);
-    if (instance_id == INSTANCE_ID) {
+    if (instance_id == INSTANCE_ID || instance_id == INSTANCE_ID_P2) {
         guid.data[4] = SWITCH_PAD_VENDOR_ID & 0xff;
         guid.data[5] = SWITCH_PAD_VENDOR_ID >> 8;
         guid.data[8] = PRODUCT_PRO_CONTROLLER & 0xff;
