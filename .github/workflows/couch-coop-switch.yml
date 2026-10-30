@@ -1,0 +1,91 @@
+# Builds the couch co-op NRO without the game disc (runtime assets, docs/RUNTIME_ASSETS.md).
+# No disc, nor anything derived from one, may ever be put into this workflow.
+name: couch-coop-switch
+
+on:
+  push:
+    branches: [couch-coop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: switch-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SWITCH_CONTAINER_ENGINE: docker
+  COS_SWITCH_NATIVE_IMAGE: centollos-switch-native-build:ci
+
+jobs:
+  nro:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - name: Keep unchanged sources older than their objects
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq git-restore-mtime
+          git restore-mtime --quiet
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: scripts/switch
+          file: scripts/switch/Containerfile.native
+          tags: centollos-switch-native-build:ci
+          load: true
+          cache-from: type=gha,scope=switch-native
+          cache-to: type=gha,mode=max,scope=switch-native
+      - name: Restore the build tree
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/switch-native
+            build/switch-dawn-src
+            build/aurora-3227d76
+            build/decomp
+            build/dksh_cache
+            ref/recompcore
+          key: switch-tree-${{ github.sha }}
+          restore-keys: switch-tree-
+      - name: Fetch Aurora and RecompCore at their pins
+        run: |
+          pin=$(sed -n 's/^set(COS_AURORA_COMMIT "\([0-9a-f]*\)".*/\1/p' native/cmake/Aurora.cmake)
+          d=build/aurora-${pin:0:7}
+          if [ ! -f "$d/cmake/aurora_core.cmake" ]; then
+            rm -rf "$d" && mkdir -p "$d"
+            git -C "$d" init -q
+            git -C "$d" remote add origin https://github.com/encounter/aurora.git
+            git -C "$d" fetch -q --depth 1 origin "$pin"
+            git -C "$d" checkout -q --detach FETCH_HEAD
+          fi
+          native/tools/fetch_recompcore.sh
+      - name: Build the NRO
+        run: scripts/switch/build_native.sh --runtime-assets --jobs 4
+      - name: Save the build tree
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/switch-native
+            build/switch-dawn-src
+            build/aurora-3227d76
+            build/decomp
+            build/dksh_cache
+            ref/recompcore
+          key: switch-tree-${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: switchwaker-couch-coop
+          if-no-files-found: error
+          path: |
+            build/switch-native/switchwaker.nro
+            build/switch-native/switchwaker.elf
+            build/switch-native/initial_pipeline_cache.db
+            build/switch-native/initial_dksh_cache.bin
