@@ -370,6 +370,7 @@ BOOL daCoopP2_c::remove() {
     fprintf(stderr, "[coop] player 2 removed\n");
     if (sP2 == this) {
         sP2 = NULL;
+        sP2Id = fpcM_ERROR_PROCESS_ID_e; // back in the next scene without the retry wait
     }
     if (mAttentionMade) {
         attentionOf(this)->~dAttention_c();
