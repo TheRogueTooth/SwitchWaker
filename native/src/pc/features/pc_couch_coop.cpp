@@ -41,6 +41,7 @@ public:
     bool mountLinkCopy();
     void warpToP1();
     bool parked() const;
+    bool ownsActor(fopAc_ac_c* actor);
     bool hidden() const;
 
     bool mArcMounted;
@@ -63,11 +64,13 @@ const int kSettleFrames = 30;
 const int kNoGroundFrames = 60;
 const f32 kTetherXZ = 2000.0f;
 const f32 kTetherY = 1500.0f;
+const int kRetryFrames = 300;
 
 daCoopP2_c* sP2 = NULL;
 fpc_ProcID sP2Id = fpcM_ERROR_PROCESS_ID_e;
 bool sJoined = false;
 int sInPlayFrames = 0;
+int sRetryFrames = 0;
 
 bool isLinkP2(const fopAc_ac_c* actor) {
     return actor != NULL && actor == sP2;
@@ -194,7 +197,7 @@ CoopActorScope::CoopActorScope(fopAc_ac_c* actor) : mPlayer(NULL), mLink(NULL), 
     if (link == NULL || actor == link) {
         return;
     }
-    bool useP2 = fopAcM_GetLinkId(actor) == fopAcM_GetID(sP2);
+    bool useP2 = sP2->ownsActor(actor);
     if (!useP2 && fopAcM_GetGroup(actor) == fopAc_ENEMY_e && !sP2->parked()) {
         useP2 = (sP2->current.pos - actor->current.pos).abs2() < (link->current.pos - actor->current.pos).abs2();
     }
@@ -284,6 +287,12 @@ cPhs_State daCoopP2_c::create() {
         (cPhs__Handler)NULL,
     };
     return dComLbG_PhaseHandler(getPhase(), l_method, this);
+}
+
+// Items player 2 made, and whatever they carry or hold, follow player 2's hands.
+bool daCoopP2_c::ownsActor(fopAc_ac_c* actor) {
+    return fopAcM_GetLinkId(actor) == fopAcM_GetID(this) || mActorKeepGrab.getActor() == actor ||
+           mActorKeepEquip.getActor() == actor;
 }
 
 // Player 2's code does not run: an event, the boat, player 1 dead, or the stage changing.
@@ -435,7 +444,12 @@ void coop_frame() {
     if (sP2Id != fpcM_ERROR_PROCESS_ID_e) {
         if (sP2 == NULL && !fpcM_IsCreating(sP2Id)) {
             sP2Id = fpcM_ERROR_PROCESS_ID_e; // deleted with its scene, or the create failed
+            sRetryFrames = kRetryFrames;
         }
+        return;
+    }
+    if (sRetryFrames > 0) {
+        sRetryFrames--;
         return;
     }
     if (!sJoined || sInPlayFrames < kSettleFrames) {

@@ -840,6 +840,12 @@ void pc_update_frame(int afterLogo) {
 }
 
 void pc_update_check(int atStart, const char* skipTag) {
+#if COS_WITH_COUCH_COOP
+    // An upstream release would replace the co-op build with the stock game.
+    (void)atStart;
+    (void)skipTag;
+    return;
+#endif
     HostScope hostAlloc;
     State& s = st();
     std::lock_guard<std::mutex> lk(s.mu);
