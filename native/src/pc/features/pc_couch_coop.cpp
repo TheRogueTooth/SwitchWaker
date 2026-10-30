@@ -26,6 +26,7 @@
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_camera.h"
 #include "m_Do/m_Do_controller_pad.h"
+#include "m_Do/m_Do_lib.h"
 #include "mods/couch_coop.h"
 #include "pc/pc_settings.h"
 #include <dolphin/gx/GXAurora.h>
