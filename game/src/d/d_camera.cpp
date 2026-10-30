@@ -7990,6 +7990,9 @@ static void preparation(camera_process_class* i_this) {
 #endif
 
     camera->SetWindow(viewport->mWidth, viewport->mHeight);
+#if COS_WITH_COUCH_COOP
+    aspect *= coop_splitAspectScale();
+#endif
     fopCamM_SetAspect(i_this, aspect);
     dComIfGp_offCameraAttentionStatus(camera_id, dCamAttnStts_00000001_e | dCamAttnStts_SUBJECT_e | dCamAttnStts_00000020_e);
 }
@@ -8008,6 +8011,11 @@ static void view_setup(camera_process_class* i_this) {
     view->mViewMtxNoTrans[1][3] = 0.0f;
     view->mViewMtxNoTrans[2][3] = 0.0f;
 
+#if COS_WITH_COUCH_COOP
+    if (g_coopInCamera2) {
+        return;
+    }
+#endif
     dComIfGd_setWindow(window);
     dComIfGd_setViewport(viewport);
     dComIfGd_setView(view);
@@ -8102,6 +8110,12 @@ static void store(camera_process_class* i_this) {
 
 /* 8017C29C-8017C350       .text camera_execute__FP20camera_process_class */
 static int camera_execute(camera_process_class* i_this) {
+#if COS_WITH_COUCH_COOP
+    CoopCameraScope coopScope(i_this);
+    if (coopScope.isP2() && !coopScope.canRun()) {
+        return TRUE;
+    }
+#endif
     preparation(i_this);
 
     if (dComIfGp_demo_getCamera()) {
@@ -8132,6 +8146,17 @@ static bool camera_draw(camera_process_class* i_this) {
     camera_class* a_this = (camera_class*)i_this;
     dCamera_c* body = &((camera_process_class*)i_this)->mCamera;
 
+#if COS_WITH_COUCH_COOP
+    CoopCameraScope coopScope(i_this);
+    if (coopScope.isP2()) {
+        // The matrices only: the draw pass, the audio listener and the map stay with player 1's camera.
+        C_MTXPerspective(i_this->view.mProjMtx, i_this->view.mFovy, i_this->view.mAspect, i_this->view.mNear, i_this->view.mFar);
+        mDoMtx_lookAt(i_this->view.mViewMtx, &i_this->view.mLookat.mEye, &i_this->view.mLookat.mCenter, &i_this->view.mLookat.mUp, i_this->view.mBank);
+        cMtx_inverse(i_this->view.mViewMtx, i_this->view.mInvViewMtx);
+        coopScope.drawn();
+        return true;
+    }
+#endif
     dDlst_window_c* window = get_window(a_this);
     view_port_class* viewport = window->getViewPort();
     int camera_id = get_camera_id(a_this);
@@ -8215,6 +8240,9 @@ static cPhs_State init_phase1(camera_class* i_this) {
     
     Vec local_18 = {10000000.0f, 10000000.0f, 10000000.0f};
 
+#if COS_WITH_COUCH_COOP
+    if (!g_coopInCamera2)
+#endif
     mDoAud_getCameraInfo(&local_18, j3dSys.getViewMtx(), camera_id);
 
     dComIfGp_setWindowNum(0);
@@ -8273,6 +8301,9 @@ static cPhs_State camera_create(camera_class* i_this) {
         (request_of_phase_process_fn)NULL,
     };
 
+#if COS_WITH_COUCH_COOP
+    CoopCameraScope coopScope(i_this);
+#endif
     camera_process_class* camera = (camera_process_class*)i_this;
     return dComLbG_PhaseHandler(&camera->phase_request, l_method, i_this);
 }
@@ -8281,6 +8312,10 @@ static cPhs_State camera_create(camera_class* i_this) {
 // int, not bool: both are called through the process method table's int-returning pointers, and
 // a bool return leaves the register's upper bits undefined on PC (zeldaret/tww 3a091431).
 static int camera_delete(camera_process_class* i_this) {
+#if COS_WITH_COUCH_COOP
+    CoopCameraScope coopScope(i_this);
+    coopScope.gone();
+#endif
     dCamera_c* camera = &i_this->mCamera;
 
     if (camera->CameraID() == 0) {

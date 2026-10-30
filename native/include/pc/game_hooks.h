@@ -101,6 +101,8 @@ extern "C" int pc_frame_split(void);
    they snapshot and compare the game's writable globals (pc_paint_purity.cpp). */
 extern "C" void pc_paint_extra_begin(void);
 extern "C" void pc_paint_extra_end(void);
+/* Couch co-op's split screen: pc_paint_is_extra() is 1 while the second half is painted. */
+extern "C" void pc_paint_extra_set(int on);
 /* 1 while paint B runs: the guards that keep it from advancing the game's paint-time state (fade,
    wipe, picto box capture, JUTFader, sea scroll, weather counters). Always 0 with the mode off. */
 extern "C" int pc_paint_is_extra(void);

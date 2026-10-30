@@ -32,6 +32,7 @@
 // aurora_begin_frame waits and retries instead of skipping the game frame.
 #include "pc_internal.h"
 #include "pc_fps60_budget.h"
+#include "mods/couch_coop.h"
 #include "pc/game_hooks.h"
 #include "pc/pc_settings.h"
 #include "pc/pc_button_remap.h"
@@ -1386,7 +1387,10 @@ unsigned int pc_frame_wait_retraces(unsigned int retraces) {
 int pc_frame_split(void) {
     // Paint B allowed (pc_fps60_camera.cpp): no scene change, overlap, wipe, fade or load in
     // progress, nor a scene created in the last frames. Asked every frame (it keeps a cool-down).
-    const bool allowed = !pc_fps60_test() || pc_fps60_paint_b_allowed();
+    bool allowed = !pc_fps60_test() || pc_fps60_paint_b_allowed();
+#if COS_WITH_COUCH_COOP
+    allowed = allowed && !coop_splitActive(); // the second paint is the other half of the screen
+#endif
     if (!sHalvedWait) {
         return 0;
     }
@@ -1543,6 +1547,10 @@ void pc_paint_extra_end(void) {
     const uint64_t ns = now - sPaintBStartNs;
     sBudget.paintB.add((double)(ns > waitNs ? ns - waitNs : 0));
     sPaintEndNs = now;
+}
+
+void pc_paint_extra_set(int on) {
+    sPaintExtra = on != 0;
 }
 
 int pc_paint_is_extra(void) {

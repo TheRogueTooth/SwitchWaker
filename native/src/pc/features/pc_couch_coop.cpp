@@ -9,8 +9,9 @@
 // Controls: + on controller 2 opens player 2's picker and joins them. ZL + ZR + Plus on either
 // controller opens that player's picker. Up and down choose, A confirms, B cancels.
 //
-// Rules of this first stage: only player 1 starts events and changes the stage. Player 2 freezes
-// during events, is hidden while player 1 sails or is dead, and warps to player 1 when lost.
+// Only player 1 starts events and changes the stage. Player 2 freezes during events, is hidden
+// while player 1 sails or is dead, and warps to player 1 when lost. Split screen shows whenever
+// player 2 is in play; cutscenes, sailing and menus go back to player 1's full screen.
 #include "d/dolzel.h" // IWYU pragma: keep
 #include "SSystem/SComponent/c_m3d.h"
 #include "d/actor/d_a_player_main.h"
@@ -19,12 +20,20 @@
 #include "d/d_com_lib_game.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_pc/f_pc_manager.h"
+#include "SSystem/SComponent/c_malloc.h"
+#include "d/d_meter.h"
+#include "d/d_stage.h"
+#include "f_op/f_op_camera_mng.h"
+#include "f_op/f_op_camera.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "mods/couch_coop.h"
+#include "pc/pc_settings.h"
+#include <dolphin/gx/GXAurora.h>
 
 #include <imgui.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <new>
 #include <utility>
@@ -33,6 +42,8 @@
 
 bool g_coopInP2 = false;
 dAttention_c* g_coopAttention = NULL;
+bool g_coopInCamera2 = false;
+const float (*g_coopClipDelta)[4] = NULL;
 
 class daCoopP2_c : public daPy_lk_c {
 public:
@@ -76,6 +87,19 @@ fpc_ProcID sP2Id = fpcM_ERROR_PROCESS_ID_e;
 bool sJoined = false;
 int sInPlayFrames = 0;
 int sRetryFrames = 0;
+bool sPicksLoaded = false;
+bool sSplitWanted = true;
+// Player 2's camera. Its process runs inside a P2Window, where this info and play.mCameraInfo[0]
+// are exchanged, so all of dCamera_c's camera id 0 code is theirs.
+dComIfG_camera_info_class sP2CameraInfo;
+fpc_ProcID sCameraId = fpcM_ERROR_PROCESS_ID_e;
+camera_process_class* sCamera = NULL;
+bool sCameraReady = false;
+// Worked out once a frame in coop_frame: inside a window the status words are player 2's.
+bool sFrameParked = true;
+bool sSplitNow = false;
+Mtx sClipDelta;
+const char* const kCharKeys[2] = {"COS_COOP_P1", "COS_COOP_P2"};
 int sPicker[2] = {-1, -1}; // the highlighted character, or -1 when closed
 int sPickerStick[2] = {0, 0};
 bool sPlayMessageShown = false;
@@ -107,6 +131,9 @@ void pickerInput(int slot) {
     sPicker[slot] = (sPicker[slot] + move + COOP_CHAR_COUNT) % COOP_CHAR_COUNT;
     if (pad.mButtonTrig.a) {
         coop_charRequest(slot, sPicker[slot]);
+        char value[8];
+        snprintf(value, sizeof(value), "%d", sPicker[slot]);
+        pc_settings_set(kCharKeys[slot], value);
         char text[64];
         snprintf(text, sizeof(text), "Player %d is %s", slot + 1, coop_charName(sPicker[slot]));
         toast(text);
@@ -132,7 +159,8 @@ dAttention_c* attentionOf(daCoopP2_c* p2) {
 
 // Items that need no first-person camera. The camera follows player 1 until split screen.
 bool itemAllowed(u8 item) {
-    return item == dItemNo_BOMB_BAG_e || item == dItemNo_SKULL_HAMMER_e;
+    return item == dItemNo_BOMB_BAG_e || item == dItemNo_SKULL_HAMMER_e || item == dItemNo_DEKU_LEAF_e ||
+           item == dItemNo_IRON_BOOTS_e;
 }
 
 void maskP2Items() {
@@ -153,8 +181,9 @@ void maskP2Items() {
 
 class P2Window {
 public:
-    explicit P2Window(daCoopP2_c* p2)
-        : mP2(p2), mKeepPos(p2->current.pos), mKeepShape(p2->shape_angle), mKeepAngle(p2->current.angle) {
+    explicit P2Window(daCoopP2_c* p2, bool swapCamera = sCameraReady)
+        : mP2(p2), mKeepPos(p2->current.pos), mKeepShape(p2->shape_angle), mKeepAngle(p2->current.angle),
+          mSwapCamera(swapCamera) {
         dComIfG_play_c& play = g_dComIfG_gameInfo.play;
         memcpy(mArcName, l_arcName, sizeof(mArcName));
         memcpy(l_arcName, p2->mArcName, sizeof(mArcName));
@@ -176,8 +205,12 @@ public:
         mDoStatus = play.getDoStatus();
         mAStatus = play.getAStatus();
         mRStatus = play.getRStatus();
-        mCameraStatus = play.getCameraAttentionStatus(0);
-        play.setCameraAttentionStatus(0, mCameraStatus & ~(dCamAttnStts_SUBJECT_e | dCamAttnStts_00000020_e));
+        if (mSwapCamera) {
+            std::swap(play.mCameraInfo[0], sP2CameraInfo);
+        } else {
+            mCameraStatus = play.getCameraAttentionStatus(0);
+            play.setCameraAttentionStatus(0, mCameraStatus & ~(dCamAttnStts_SUBJECT_e | dCamAttnStts_00000020_e));
+        }
         g_coopInP2 = true;
         g_coopAttention = attentionOf(p2);
     }
@@ -185,7 +218,11 @@ public:
         dComIfG_play_c& play = g_dComIfG_gameInfo.play;
         g_coopAttention = NULL;
         g_coopInP2 = false;
-        play.setCameraAttentionStatus(0, mCameraStatus);
+        if (mSwapCamera) {
+            std::swap(play.mCameraInfo[0], sP2CameraInfo);
+        } else {
+            play.setCameraAttentionStatus(0, mCameraStatus);
+        }
         play.setRStatus(mRStatus);
         play.setAStatus(mAStatus);
         play.setDoStatus(mDoStatus);
@@ -215,12 +252,221 @@ private:
     fopAc_ac_c* mLink;
     u32 mLinkAttention;
     u32 mCameraStatus;
+    bool mSwapCamera;
     u8 mDoStatus;
     u8 mAStatus;
     u8 mRStatus;
 };
 
 } // namespace
+
+namespace {
+
+alignas(P2Window) unsigned char sCameraWindow[sizeof(P2Window)];
+
+void applyCharacter(const char* key, const char* value, void* user) {
+    (void)key;
+    (void)user;
+    coop_charRequest(user == NULL ? 0 : 1, atoi(value));
+}
+
+void applySplit(const char* key, const char* value, void* user) {
+    (void)key;
+    (void)user;
+    sSplitWanted = strcmp(value, "0") != 0;
+}
+
+void projParams(const Mtx44 p, f32 out[6]) {
+    out[0] = p[0][0];
+    out[1] = p[0][2];
+    out[2] = p[1][1];
+    out[3] = p[1][2];
+    out[4] = p[2][2];
+    out[5] = p[2][3];
+}
+
+void setDelta(view_class* first, const Mtx second) {
+    Mtx inverse, delta;
+    f32 from[6], to[6];
+    MTXInverse(first->mViewMtx, inverse);
+    MTXConcat(second, inverse, delta);
+    projParams(first->mProjMtx, from);
+    projParams(coop_secondView()->mProjMtx, to);
+    AuroraSetViewDelta(&delta[0][0], from, to);
+}
+
+} // namespace
+
+void coop_settingsRegister() {
+    static const PcSettingChoice kCharChoices[] = {
+        {"0", "Link", NULL},          {"1", "Medli", NULL},  {"2", "Makar", NULL},  {"3", "Prince Komali", NULL},
+        {"4", "Tetra", NULL},         {"5", "Aryll", NULL},  {"6", "Laruto", NULL},
+    };
+    static const PcSettingChoice kOnOff[] = {{"0", "Desactivado", "Off"}, {"1", "Activado", "On"}};
+    PcSettingDesc d = {};
+    d.tab = PC_SETTING_TAB_QOL;
+    d.choices = kCharChoices;
+    d.choiceCount = ARRAY_SIZE(kCharChoices);
+    d.defaultValue = "0";
+    d.apply = applyCharacter;
+    d.order = 900;
+    d.key = kCharKeys[0];
+    d.label = "Personaje del jugador 1";
+    d.labelEn = "Player 1 character";
+    d.help = "A quién manejas. Se guarda; también con ZL + ZR + Más durante el juego.";
+    d.helpEn = "Who you play as, solo too. Saved. In play: ZL + ZR + Plus.";
+    d.user = NULL;
+    pc_settings_register(&d);
+    d.order = 901;
+    d.key = kCharKeys[1];
+    d.label = "Personaje del jugador 2";
+    d.labelEn = "Player 2 character";
+    d.help = "A quién maneja el segundo mando. Se guarda; también con Más en ese mando.";
+    d.helpEn = "Who controller 2 plays as. Saved. In play: + on that controller.";
+    d.user = (void*)1;
+    pc_settings_register(&d);
+    d.order = 902;
+    d.key = "COS_COOP_SPLIT";
+    d.label = "Pantalla dividida";
+    d.labelEn = "Split screen";
+    d.help = "Con el jugador 2 en juego, media pantalla para cada uno.";
+    d.helpEn = "With player 2 in play, half the screen for each.";
+    d.choices = kOnOff;
+    d.choiceCount = ARRAY_SIZE(kOnOff);
+    d.defaultValue = "1";
+    d.apply = applySplit;
+    d.user = NULL;
+    pc_settings_register(&d);
+}
+
+bool coop_splitActive() {
+    return sSplitNow;
+}
+
+float coop_splitAspectScale() {
+    return coop_splitActive() ? 0.5f : 1.0f;
+}
+
+void coop_splitViewport(int view, float* x, float* width) {
+    const float half = *width * 0.5f;
+    if (view == 1) {
+        *x += half + 1.0f;
+    }
+    *width = half - 1.0f;
+}
+
+view_class* coop_secondView() {
+    return &sCamera->view;
+}
+
+void coop_paintDeltaOn(view_class* first) {
+    setDelta(first, sCamera->view.mViewMtx);
+}
+
+void coop_paintDeltaOff() {
+    AuroraSetViewDelta(nullptr, nullptr, nullptr);
+}
+
+// The sky is built around player 1's eye: it only turns, as if it were built around player 2's.
+void coop_paintSkyBegin(view_class* first) {
+    Mtx sky;
+    MTXCopy(sCamera->view.mViewMtx, sky);
+    const cXyz& eye = first->mLookat.mEye;
+    for (int r = 0; r < 3; r++) {
+        sky[r][3] = -(sky[r][0] * eye.x + sky[r][1] * eye.y + sky[r][2] * eye.z);
+    }
+    setDelta(first, sky);
+}
+
+void coop_paintSkyEnd(view_class* first) {
+    coop_paintDeltaOn(first);
+}
+
+// Particles take the view at paint time, so their billboards can face player 2's camera directly.
+void coop_paintParticlesBegin(view_class* first) {
+    (void)first;
+    coop_paintDeltaOff();
+    GXSetProjection(sCamera->view.mProjMtx, GX_PERSPECTIVE);
+}
+
+void coop_paintParticlesEnd(view_class* first) {
+    GXSetProjection(first->mProjMtx, GX_PERSPECTIVE);
+    coop_paintDeltaOn(first);
+}
+
+int coop_clipSecond(const float (*m)[4], Vec* max, Vec* min) {
+    Mtx second;
+    MTXConcat(sClipDelta, m, second);
+    return mDoLib_clipper::mClipper.clip(second, max, min);
+}
+
+int coop_clipSecond(const float (*m)[4], const Vec& center, float radius) {
+    Mtx second;
+    MTXConcat(sClipDelta, m, second);
+    return mDoLib_clipper::mClipper.clip(second, center, radius);
+}
+
+CoopCameraScope::CoopCameraScope(void* camera)
+    : mP2(sCameraId != fpcM_ERROR_PROCESS_ID_e && fpcM_GetID(camera) == sCameraId), mWindow(false), mWindowNum(0) {
+    if (!mP2) {
+        return;
+    }
+    sCamera = static_cast<camera_process_class*>(camera);
+    mWindowNum = dComIfGp_getWindowNum();
+    g_coopInCamera2 = true;
+    if (sP2 != NULL) {
+        new (sCameraWindow) P2Window(sP2, true);
+        mWindow = true;
+    } else {
+        std::swap(g_dComIfG_gameInfo.play.mCameraInfo[0], sP2CameraInfo);
+    }
+}
+
+CoopCameraScope::~CoopCameraScope() {
+    if (!mP2) {
+        return;
+    }
+    if (mWindow) {
+        reinterpret_cast<P2Window*>(sCameraWindow)->~P2Window();
+    } else {
+        std::swap(g_dComIfG_gameInfo.play.mCameraInfo[0], sP2CameraInfo);
+    }
+    g_coopInCamera2 = false;
+    dComIfGp_setWindowNum(mWindowNum);
+    if (sCameraId == fpcM_ERROR_PROCESS_ID_e) {
+        sCamera = NULL;
+    }
+}
+
+bool CoopCameraScope::canRun() const {
+    if (sP2 == NULL || sFrameParked) {
+        return false;
+    }
+    sCameraReady = true;
+    return true;
+}
+
+// Inside the window player 1's camera info is the one set aside.
+void CoopCameraScope::drawn() {
+    camera_process_class* first = (camera_process_class*)sP2CameraInfo.mpCamera;
+    Mtx inverse;
+    if (first != NULL && coop_splitActive() && MTXInverse(first->view.mViewMtx, inverse)) {
+        MTXConcat(sCamera->view.mViewMtx, inverse, sClipDelta);
+        g_coopClipDelta = sClipDelta;
+    } else {
+        g_coopClipDelta = NULL;
+    }
+}
+
+void CoopCameraScope::gone() {
+    if (mP2) {
+        fprintf(stderr, "[coop] player 2's camera removed\n");
+        sCameraId = fpcM_ERROR_PROCESS_ID_e;
+        sCameraReady = false;
+        sSplitNow = false;
+        g_coopClipDelta = NULL;
+    }
+}
 
 bool coop_restartInstead(const fopAc_ac_c* player) {
     if (!isLinkP2(player)) {
@@ -418,6 +664,8 @@ BOOL daCoopP2_c::remove() {
     fprintf(stderr, "[coop] player 2 removed\n");
     if (sP2 == this) {
         sP2 = NULL;
+        sSplitNow = false;
+        g_coopClipDelta = NULL;
         sP2Id = fpcM_ERROR_PROCESS_ID_e; // back in the next scene without the retry wait
     }
     if (mAttentionMade) {
@@ -479,6 +727,19 @@ actor_process_profile_definition g_profile_COOP_P2 = {
     /* Cull Type    */ fopAc_CULLBOX_0_e,
 };
 
+// As dStage_cameraCreate, which does not return the process.
+static fpc_ProcID coop_createCamera() {
+    fopCamM_prm_class* params = (fopCamM_prm_class*)cMl::memalignB(-4, sizeof(fopCamM_prm_class));
+    if (params == NULL) {
+        return fpcM_ERROR_PROCESS_ID_e;
+    }
+    params->base.position.x = 0.0f;
+    params->base.position.y = 0.0f;
+    params->base.position.z = 0.0f;
+    params->base.parameters = 0;
+    return fopCamM_Create(1, fpcNm_CAMERA_e, params);
+}
+
 void coop_uiFrame() {
     ImGuiIO& io = ImGui::GetIO();
     const float scale = io.DisplaySize.y / 720.0f * 1.5f;
@@ -535,6 +796,28 @@ void coop_frame() {
     const bool inPlay = link != NULL && stage[0] != '\0' && strcmp(stage, "sea_T") != 0 && strcmp(stage, "Name") != 0 &&
                         !dComIfGp_isEnableNextStage() && !dComIfGp_event_runCheck();
     sInPlayFrames = inPlay ? sInPlayFrames + 1 : 0;
+    if (inPlay && !sPicksLoaded) {
+        sPicksLoaded = true;
+        sSplitWanted = strcmp(pc_settings_get("COS_COOP_SPLIT"), "0") != 0;
+        coop_charRequest(0, atoi(pc_settings_get(kCharKeys[0])));
+    }
+    sFrameParked = sP2 == NULL || sP2->parked();
+    sSplitNow = sSplitWanted && sP2 != NULL && sCameraReady && !sFrameParked && !sP2->hidden() && !dMenu_flag();
+    if (!sSplitNow) {
+        g_coopClipDelta = NULL;
+    }
+    if (sP2 != NULL && sCameraId == fpcM_ERROR_PROCESS_ID_e && inPlay && sSplitWanted) {
+        // From the player's layer, like player 2.
+        sP2CameraInfo = g_dComIfG_gameInfo.play.mCameraInfo[0];
+        sP2CameraInfo.mpCamera = NULL;
+        sP2CameraInfo.mCameraAttentionStatus = 0;
+        sCameraReady = false;
+        layer_class* savedLayer = fpcLy_CurrentLayer();
+        fpcLy_SetCurrentLayer(static_cast<base_process_class*>(link)->mLyTg.mpLayer);
+        sCameraId = coop_createCamera();
+        fpcLy_SetCurrentLayer(savedLayer);
+        fprintf(stderr, "[coop] player 2's camera requested (process %u)\n", (unsigned)sCameraId);
+    }
     if (sInPlayFrames == kSettleFrames && !sPlayMessageShown) {
         sPlayMessageShown = true;
         toast(sPad2Connected ? "Co-op: + on controller 2 joins. ZL+ZR+Plus: change character"
@@ -551,11 +834,13 @@ void coop_frame() {
             continue;
         }
         interface_of_controller_pad& pad = g_mDoCPd_cpadInfo[slot];
-        const bool combo = pad.mButtonTrig.start && pad.mHoldLockL && pad.mHoldLockR;
+        const bool combo = pad.mButtonTrig.start && (pad.mHoldLockL || pad.mButtonHold.l) &&
+                           (pad.mHoldLockR || pad.mButtonHold.r);
         if (sInPlayFrames >= kSettleFrames && (combo || (slot == 1 && pad.mButtonTrig.start))) {
             if (slot == 1 && !sJoined) {
                 sJoined = true;
                 fprintf(stderr, "[coop] player 2 joined\n");
+                coop_charRequest(1, atoi(pc_settings_get(kCharKeys[1])));
             }
             sPicker[slot] = coop_charWanted(slot);
             pad.mButtonTrig.start = 0;

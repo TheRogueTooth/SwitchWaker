@@ -14,6 +14,8 @@ typedef struct _GXTlutObj GXTlutObj;
 typedef struct Vec Vec;
 struct ResTIMG;
 
+#include "mods/couch_coop.h"
+
 struct mDoLib_clipper {
     static void changeFar(f32 far) {
         mClipper.setFar(far);
@@ -21,15 +23,29 @@ struct mDoLib_clipper {
     }
 
     static BOOL clip(const Mtx m, Vec* max, Vec* min) {
+#if COS_WITH_COUCH_COOP
+        BOOL coopClipped = mClipper.clip(m, max, min);
+        return coopClipped && g_coopClipDelta != NULL ? coop_clipSecond(m, max, min) : coopClipped;
+#else
         return mClipper.clip(m, max, min);
+#endif
     }
 
     static BOOL clip(const Mtx m, Vec center, f32 radius) {
+#if COS_WITH_COUCH_COOP
+        BOOL coopClipped = mClipper.clip(m, center, radius);
+        return coopClipped && g_coopClipDelta != NULL ? coop_clipSecond(m, center, radius) : coopClipped;
+#else
         return mClipper.clip(m, center, radius);
+#endif
     }
     
     static BOOL clip(J3DModel* model) {
+#if COS_WITH_COUCH_COOP
+        return g_coopClipDelta != NULL ? FALSE : mClipper.clipByBox(model);
+#else
         return mClipper.clipByBox(model);
+#endif
     }
 
     static f32 getFar() { return mSystemFar; }

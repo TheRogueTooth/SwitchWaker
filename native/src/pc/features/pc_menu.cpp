@@ -2544,6 +2544,9 @@ void menuInit() {
         return;
     }
     m.initialized = true;
+#if COS_WITH_COUCH_COOP
+    coop_settingsRegister();
+#endif
     for (const PcSettingDesc& d : kBuiltins) {
         // A module that registered the key already (e.g. the HD texture loader) keeps its row.
         bool known = false;

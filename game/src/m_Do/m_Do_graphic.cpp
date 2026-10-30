@@ -1656,6 +1656,11 @@ bool mDoGph_Painter() {
 #endif
             dComIfGd_imageDrawShadow(camera->view.mViewMtx);
 
+#if COS_WITH_COUCH_COOP
+            int coopView = 0;
+            bool coopSplit = false;
+        coopPaintView:
+#endif
             view_port_class viewport_crop;
             view_port_class* viewport_p = window->getViewPort();
             if (viewport_p->mXOrig != 0.0f || viewport_p->mYOrig != 0.0f) {
@@ -1669,12 +1674,26 @@ bool mDoGph_Painter() {
                 viewport_p = &viewport_crop;
             }
 
+#if COS_WITH_COUCH_COOP
+            view_port_class coopPort;
+            coopSplit = coop_splitActive() && !mDoGph_gInf_c::isMonotone();
+            if (coopSplit) {
+                coopPort = *viewport_p;
+                coop_splitViewport(coopView, &coopPort.mXOrig, &coopPort.mWidth);
+                viewport_p = &coopPort;
+            }
+#endif
             GXSetViewport(viewport_p->mXOrig, viewport_p->mYOrig, viewport_p->mWidth, viewport_p->mHeight, viewport_p->mNearZ, viewport_p->mFarZ);
             GXSetScissor(viewport_p->mXOrig, viewport_p->mYOrig, viewport_p->mWidth, viewport_p->mHeight);
 
-            JPADrawInfo jpaDrawInfo(camera->view.mViewMtx, 45.0f, 1.218f);
-            jpaDrawInfo.setFovy(camera->view.mFovy);
-            jpaDrawInfo.setAspect(camera->view.mAspect);
+#if COS_WITH_COUCH_COOP
+            view_class* jpaView = coopView == 1 ? coop_secondView() : &camera->view;
+#else
+            view_class* jpaView = &camera->view;
+#endif
+            JPADrawInfo jpaDrawInfo(jpaView->mViewMtx, 45.0f, 1.218f);
+            jpaDrawInfo.setFovy(jpaView->mFovy);
+            jpaDrawInfo.setAspect(jpaView->mAspect);
 
 #if VERSION > VERSION_DEMO
             BOOL isTower9 = FALSE;
@@ -1689,17 +1708,36 @@ bool mDoGph_Painter() {
             // COS_FPS60_TEST step B (game_hooks.h): in paint B, the draws with this projection see
             // the camera halfway between the last two draw passes' (Aurora's view delta, patch
             // 0019) until pc_fps60_view_end below.
+#if COS_WITH_COUCH_COOP
+            if (coopView == 1) {
+                coop_paintDeltaOn(&camera->view);
+            } else
+#endif
             pc_fps60_view_begin(&camera->view);
 #endif
             PPCSync();
             j3dSys.setViewMtx(camera->view.mViewMtx);
             dKy_setLight();
             PC_GPU_GROUP("sky");
+#if COS_WITH_COUCH_COOP
+            if (coopView == 1)
+                coop_paintSkyBegin(&camera->view);
+#endif
             dComIfGd_drawOpaListSky();
             dComIfGd_drawXluListSky();
+#if COS_WITH_COUCH_COOP
+            if (coopView == 1)
+                coop_paintSkyEnd(&camera->view);
+            if (coopView == 1)
+                coop_paintParticlesBegin(&camera->view);
+#endif
 
             if (!dMenu_flag() && dPa_control_c::isStatus(0x01))
                 dComIfGp_particle_drawShipTail(&jpaDrawInfo);
+#if COS_WITH_COUCH_COOP
+            if (coopView == 1)
+                coop_paintParticlesEnd(&camera->view);
+#endif
 
             GXSetClipMode(GX_CLIP_ENABLE);
             PC_GPU_GROUP("opa_bg");
@@ -1741,8 +1779,16 @@ bool mDoGph_Painter() {
                 clearAlphaBuffer(&camera->view, dComIfGd_getSpotModelColor().a);
 #endif
 
+#if COS_WITH_COUCH_COOP
+            if (coopView == 1)
+                coop_paintParticlesBegin(&camera->view);
+#endif
             if (!dMenu_flag() && !dPa_control_c::isStatus(0x01))
                 dComIfGp_particle_drawShipTail(&jpaDrawInfo);
+#if COS_WITH_COUCH_COOP
+            if (coopView == 1)
+                coop_paintParticlesEnd(&camera->view);
+#endif
 
             PC_GPU_GROUP("xlu_p1");
             if (!mDoGph_gInf_c::isMonotone())
@@ -1751,6 +1797,10 @@ bool mDoGph_Painter() {
             PC_GPU_GROUP("xlu");
             dComIfGd_drawXluList();
 
+#if COS_WITH_COUCH_COOP
+            if (coopView == 1)
+                coop_paintParticlesBegin(&camera->view);
+#endif
             if (!dMenu_flag()) {
                 PC_GPU_GROUP("particle");
                 dComIfGp_particle_draw(&jpaDrawInfo);
@@ -1773,6 +1823,10 @@ bool mDoGph_Painter() {
                 GXSetClipMode(GX_CLIP_ENABLE);
             }
 
+#if COS_WITH_COUCH_COOP
+            if (coopView == 1)
+                coop_paintParticlesEnd(&camera->view);
+#endif
             PC_GPU_GROUP("filter");
             dComIfGd_drawOpaListFilter();
 
@@ -1800,20 +1854,49 @@ bool mDoGph_Painter() {
             dComIfGd_drawXluListMaskOff();
 
             if (!dMenu_flag()) {
+#if COS_WITH_COUCH_COOP
+                if (!coopSplit) {
+#endif
                 PC_GPU_GROUP("motion_blur");
                 motionBlure(&camera->view);
                 PC_GPU_GROUP("dof");
                 drawDepth(&camera->view, viewport_p, dComIfGp_getCameraZoomForcus(cameraID));
+#if COS_WITH_COUCH_COOP
+                }
+#endif
 #if VERSION == VERSION_PAL
                 GXInvalidateTexAll();
 #endif
+#if COS_WITH_COUCH_COOP
+                if (coopView == 1)
+                    coop_paintParticlesBegin(&camera->view);
+#endif
                 PC_GPU_GROUP("particle_proj");
                 dComIfGp_particle_drawProjection(&jpaDrawInfo);
+#if COS_WITH_COUCH_COOP
+                if (coopView == 1)
+                    coop_paintParticlesEnd(&camera->view);
+#endif
 
                 GXSetClipMode(GX_CLIP_ENABLE);
                 PC_GPU_GROUP("invisible");
                 dComIfGd_drawOpaListInvisible();
                 dComIfGd_drawXluListInvisible();
+#if COS_WITH_COUCH_COOP
+                if (coopSplit) {
+                    if (coopView == 0) {
+                        // Player 2's half: the same lists again, seen from their camera.
+                        coopView = 1;
+                        pc_paint_extra_set(1);
+                        goto coopPaintView;
+                    }
+                    coop_paintDeltaOff();
+                    pc_paint_extra_set(0);
+                    GXSetViewport(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 1.0f);
+                    GXSetScissor(0, 0, 640, 480);
+                    GXSetProjection(camera->view.mProjMtx, GX_PERSPECTIVE);
+                }
+#endif
 
 #if VERSION > VERSION_DEMO
                 j3dSys.reinitGX();
