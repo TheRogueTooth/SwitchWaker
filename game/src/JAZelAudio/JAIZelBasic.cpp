@@ -13,6 +13,7 @@
 #include "JSystem/JAudio/JAISound.h"
 #include "JSystem/JAudio/JAIStreamMgr.h"
 #include "JSystem/JAudio/JAIBankWave.h"
+#include "mods/couch_coop.h"
 #include "JSystem/JAudio/JASSystemHeap.h"
 #include "JSystem/JAudio/JASWaveBankMgr.h"
 #include "JSystem/JKernel/JKRSolidHeap.h"
@@ -3136,7 +3137,11 @@ void JAIZelBasic::linkVoiceStart(u32 id, Vec* pos, u8 vowel, s8 reverb) {
     }
     if (voice != 0xFF) {
         voice += JA_SE_LK_V_01_01;
+#if COS_WITH_COUCH_COOP
+        seStart(voice, pos, 0, reverb, g_coopVoicePitch, 1.0f, -1.0f, -1.0f, 0);
+#else
         seStart(voice, pos, 0, reverb, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+#endif
     }
 }
 

@@ -12,6 +12,11 @@
 #include "d/actor/d_a_player_main.h"
 #include "mods/couch_coop.h"
 #include <utility>
+#if COS_WITH_COUCH_COOP
+#define COOP_RUN_SCALE * coop_charRunScale(this)
+#else
+#define COOP_RUN_SCALE
+#endif
 #include "d/actor/d_a_demo_item.h"
 #include "d/actor/d_a_npc_fa1.h"
 #include "d/actor/d_a_obj_movebox.h"
@@ -182,7 +187,15 @@ void daPy_lk_c::seStartSwordCut(u32 i_seNum) {
 
 /* 8010314C-801031A4       .text voiceStart__9daPy_lk_cFUl */
 void daPy_lk_c::voiceStart(u32 i_soundID) {
+#if COS_WITH_COUCH_COOP
+    if (coop_charVoice(this, i_soundID, &eyePos, mReverb)) {
+        return;
+    }
+#endif
     mDoAud_linkVoiceStart(i_soundID, &eyePos, mDoAud_getLinkVoiceVowel(i_soundID), mReverb);
+#if COS_WITH_COUCH_COOP
+    g_coopVoicePitch = 1.0f;
+#endif
 }
 
 /* 801031A4-801031DC       .text itemButton__9daPy_lk_cCFv */
@@ -2538,6 +2551,14 @@ void daPy_lk_c::posMoveFromFootPos() {
             speed.y = maxFallSpeed;
         }
     }
+#if COS_WITH_COUCH_COOP
+    const f32 coopGlide = coop_charGlideSpeed(this);
+    if (coopGlide != 0.0f && speed.y < coopGlide && CPad_CHECK_HOLD_A(0) &&
+        (mCurProc == daPyProc_FALL_e || mCurProc == daPyProc_AUTO_JUMP_e)) {
+        speed.y = coopGlide;
+        m35F0 = current.pos.y; // a glide lands softly
+    }
+#endif
     if (speed.y <= 0.0f && f1 > 0.0f) {
         m35F0 = current.pos.y;
     }
@@ -3390,7 +3411,7 @@ void daPy_lk_c::setBlendAtnMoveAnime(f32 i_morf) {
         mMaxNormalSpeed = m_HIO->mAtnMoveB.m.field_0xC;
         setBlendAtnBackMoveAnime(i_morf);
     } else if (uVar2 == DIR_FORWARD) {
-        mMaxNormalSpeed = m_HIO->mMove.m.field_0x18;
+        mMaxNormalSpeed = m_HIO->mMove.m.field_0x18 COOP_RUN_SCALE;
         setBlendMoveAnime(i_morf);
     } else {
         daPy_ANM anm0;
@@ -4500,7 +4521,7 @@ BOOL daPy_lk_c::checkNextMode(int r29) {
     if (r24) {
         mMaxNormalSpeed = m_HIO->mAtnMove.m.field_0xC;
     } else {
-        mMaxNormalSpeed = m_HIO->mMove.m.field_0x18;
+        mMaxNormalSpeed = m_HIO->mMove.m.field_0x18 COOP_RUN_SCALE;
     }
     
     if (changeSlideProc()) {
@@ -4989,6 +5010,11 @@ BOOL daPy_lk_c::changeWaitProc() {
 /* 80110028-8011029C       .text changeLandProc__9daPy_lk_cFf */
 BOOL daPy_lk_c::changeLandProc(f32 i_anmSpeed) {
     f32 dVar7 = m35F0 - current.pos.y;
+#if COS_WITH_COUCH_COOP
+    if ((coop_charPassive(this) & COOP_PASSIVE_SOFT_LAND) != 0) {
+        dVar7 = 0.0f;
+    }
+#endif
     if (mCurrAttributeCode != dBgS_Attr_GIANT_FLOWER_e &&
         ((dVar7 >= (100.0f * m_HIO->mFall.m.field_0x14))))
     {
@@ -12320,7 +12346,7 @@ void daPy_lk_c::playerInit() {
     mAcch.OnLineCheck();
     mAcch.ClrRoofNone();
     mAcch.SetRoofCrrHeight(125.0f);
-    mMaxNormalSpeed = m_HIO->mMove.m.field_0x18;
+    mMaxNormalSpeed = m_HIO->mMove.m.field_0x18 COOP_RUN_SCALE;
     gravity = m_HIO->mAutoJump.m.field_0xC;
     maxFallSpeed = m_HIO->mAutoJump.m.field_0x10;
     mAcchCir[0].SetWall(30.1f, 35.0f);

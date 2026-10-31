@@ -252,6 +252,9 @@ BOOL daPy_lk_c::changeSwimOutProc() {
         return checkNextMode(0);
     }
 
+#if COS_WITH_COUCH_COOP
+    if (coop_charUsesSwimTimer(this))
+#endif
     if (dComIfGp_getItemTimeCount() <= 0 && startRestartRoom(5, 0xC9, -1.0f, 0)) {
         voiceStart(0x21);
         mFrameCtrlUnder[UNDER_MOVE0_e].setRate(0.0f);
@@ -278,6 +281,11 @@ void daPy_lk_c::setSwimMoveAnime(daPy_ANM swimMoveAnm) {
 
 /* 8013D638-8013D6B8       .text getSwimTimerRate__9daPy_lk_cFv */
 f32 daPy_lk_c::getSwimTimerRate() {
+#if COS_WITH_COUCH_COOP
+    if (!coop_charUsesSwimTimer(this)) {
+        return 0.0f;
+    }
+#endif
     f32 swimTimerRate;
     if (dComIfGp_getItemSwimTimerStatus() && !dComIfGp_event_runCheck()) {
         swimTimerRate = (1.0f - dComIfGp_getItemTimeCount() * 0.0011111111f);
@@ -297,6 +305,14 @@ f32 daPy_lk_c::getSwimTimerRate() {
 void daPy_lk_c::setSwimTimerStartStop() {
     f32 target = 0.0f;
 
+#if COS_WITH_COUCH_COOP
+    if (!coop_charUsesSwimTimer(this)) {
+        if (coop_charIsPlayer1(this)) {
+            dComIfGp_setItemTimeCount(900);
+            dComIfGp_stopItemSwimTimer();
+        }
+    } else
+#endif
     if (mAcch.GetGroundH() <= mWaterY - 175.0f) {
         dComIfGp_startItemSwimTimer();
 

@@ -786,6 +786,8 @@ void coop_uiFrame() {
                                    on ? ">" : " ", coop_charName(i));
             }
             ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "%s", coop_charPassiveText(sPicker[slot]));
+            ImGui::Separator();
             ImGui::TextUnformatted("A: choose   B: cancel");
         }
         ImGui::End();

@@ -46,6 +46,26 @@ float coop_charRadiusScale(const daPy_lk_c* player);
 float coop_charHeadDrop(const daPy_lk_c* player);
 void coop_charOnPlayerDelete(daPy_lk_c* player);
 
+// Passive abilities and voices.
+enum {
+    COOP_PASSIVE_WATER = 1,
+    COOP_PASSIVE_GLIDE = 2,
+    COOP_PASSIVE_FLUTTER = 4,
+    COOP_PASSIVE_SOFT_LAND = 8,
+    COOP_PASSIVE_RUN = 16,
+    COOP_PASSIVE_HEAL = 32,
+    COOP_PASSIVE_MAGIC = 64,
+};
+int coop_charPassive(const daPy_lk_c* player);
+const char* coop_charPassiveText(int character);
+bool coop_charUsesSwimTimer(const daPy_lk_c* player);
+bool coop_charIsPlayer1(const daPy_lk_c* player);
+float coop_charGlideSpeed(const daPy_lk_c* player);
+float coop_charRunScale(const daPy_lk_c* player);
+extern float g_coopVoicePitch;
+// True when the character's own recording played instead of Link's clip.
+bool coop_charVoice(const daPy_lk_c* player, unsigned int id, Vec* pos, signed char reverb);
+
 // The options menu's rows: each player's saved character, and split screen on or off.
 void coop_settingsRegister();
 
