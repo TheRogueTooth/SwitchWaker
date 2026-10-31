@@ -1676,15 +1676,15 @@ bool mDoGph_Painter() {
 
 #if COS_WITH_COUCH_COOP
             view_port_class coopPort;
-            coopSplit = coop_splitActive() && !mDoGph_gInf_c::isMonotone();
+            coopSplit = coop_splitActive() && !mDoGph_gInf_c::isMonotone() && !dMenu_flag();
             if (coopSplit) {
                 coopPort = *viewport_p;
                 coop_splitViewport(coopView, &coopPort.mXOrig, &coopPort.mWidth);
                 viewport_p = &coopPort;
+                // The last half advances the paint-time state (line buffers, sea, weather), as a
+                // single paint would; the first only draws.
+                pc_paint_extra_set(coopView == 0);
             }
-            // The last half advances the paint-time state (line buffers, sea, weather), as a
-            // single paint would; the first only draws.
-            pc_paint_extra_set(coopSplit && coopView == 0);
 #endif
             GXSetViewport(viewport_p->mXOrig, viewport_p->mYOrig, viewport_p->mWidth, viewport_p->mHeight, viewport_p->mNearZ, viewport_p->mFarZ);
             GXSetScissor(viewport_p->mXOrig, viewport_p->mYOrig, viewport_p->mWidth, viewport_p->mHeight);
