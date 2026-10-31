@@ -31,6 +31,7 @@
 #include "pc/pc_settings.h"
 #include <dolphin/gx/GXAurora.h>
 
+#include <aurora/aurora.h>
 #include <imgui.h>
 
 #include <cstdio>
@@ -99,6 +100,14 @@ bool sCameraReady = false;
 // Worked out once a frame in coop_frame: inside a window the status words are player 2's.
 bool sFrameParked = true;
 bool sSplitNow = false;
+// Aurora aborts when a frame overflows its fixed staging buffers, and two paints come closer to
+// that. Near the limit the second paint stops for a few seconds.
+int sSplitCooldown = 0;
+const int kSplitCooldownFrames = 150;
+const u32 kVertLimit = 5242880u / 10u * 7u;
+const u32 kUniformLimit = 25165824u / 10u * 7u;
+const u32 kIndexLimit = 2097152u / 10u * 7u;
+const u32 kStorageLimit = 8388608u / 10u * 7u;
 Mtx sClipDelta;
 const char* const kCharKeys[2] = {"COS_COOP_P1", "COS_COOP_P2"};
 int sPicker[2] = {-1, -1}; // the highlighted character, or -1 when closed
@@ -802,10 +811,34 @@ void coop_frame() {
         sSplitWanted = strcmp(pc_settings_get("COS_COOP_SPLIT"), "0") != 0;
         coop_charRequest(0, atoi(pc_settings_get(kCharKeys[0])));
     }
+    if (sSplitNow) {
+        if (const AuroraStats* stats = aurora_get_stats()) {
+            if (stats->lastVertSize > kVertLimit || stats->lastUniformSize > kUniformLimit ||
+                stats->lastIndexSize > kIndexLimit || stats->lastStorageSize > kStorageLimit) {
+                sSplitCooldown = kSplitCooldownFrames;
+                fprintf(stderr, "[coop] near the renderer's limit (verts %u, uniforms %u, indices %u, storage %u): "
+                                "one view for a moment\n",
+                        (unsigned)stats->lastVertSize, (unsigned)stats->lastUniformSize,
+                        (unsigned)stats->lastIndexSize, (unsigned)stats->lastStorageSize);
+            }
+        }
+    }
+    if (sSplitCooldown > 0) {
+        sSplitCooldown--;
+    }
     sFrameParked = sP2 == NULL || sP2->parked();
-    sSplitNow = sSplitWanted && sP2 != NULL && sCameraReady && !sFrameParked && !sP2->hidden() && !dMenu_flag();
+    const bool splitBefore = sSplitNow;
+    sSplitNow = sSplitWanted && sP2 != NULL && sCameraReady && !sFrameParked && !sP2->hidden() && !dMenu_flag() &&
+                sSplitCooldown == 0;
+    if (sSplitNow != splitBefore) {
+        fprintf(stderr, "[coop] split screen %s\n", sSplitNow ? "on" : "off");
+    }
     if (!sSplitNow) {
         g_coopClipDelta = NULL;
+    }
+    if (sCameraId != fpcM_ERROR_PROCESS_ID_e && sCamera == NULL && !fpcM_IsCreating(sCameraId)) {
+        fprintf(stderr, "[coop] player 2's camera did not come up\n");
+        sCameraId = fpcM_ERROR_PROCESS_ID_e; // cancelled with its scene
     }
     if (sP2 != NULL && sCameraId == fpcM_ERROR_PROCESS_ID_e && inPlay && sSplitWanted) {
         // From the player's layer, like player 2.

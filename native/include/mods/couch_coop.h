@@ -42,6 +42,8 @@ void coop_charAfterCalc(daPy_lk_c* player);
 bool coop_charDraw(daPy_lk_c* player, bool firstPerson);
 J3DModel* coop_charShadowModel(daPy_lk_c* player, J3DModel* linkModel);
 float coop_charRadiusScale(const daPy_lk_c* player);
+// How far below Link's the character's head is: what others look at, and the camera's target.
+float coop_charHeadDrop(const daPy_lk_c* player);
 void coop_charOnPlayerDelete(daPy_lk_c* player);
 
 // The options menu's rows: each player's saved character, and split screen on or off.

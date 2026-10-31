@@ -9850,6 +9850,7 @@ void daPy_lk_c::setCollision() {
     }
 #if COS_WITH_COUCH_COOP
     mCyl.SetR(mCyl.GetR() * coop_charRadiusScale(this));
+    mCyl.SetH(mCyl.GetH() - 40.1f * (1.0f - coop_charRadiusScale(this)));
 #endif
     mCyl.SetC(spD0);
     if (checkModeFlg(ModeFlg_DAMAGE) || checkGuardSlip() || mCurProc == daPyProc_VOMIT_WAIT_e || mDamageWaitTimer != 0)
@@ -10323,6 +10324,9 @@ void daPy_lk_c::setAttentionPos() {
         return;
     } else {
         attention_info.position.y = 92.5f + mpCLModel->getBaseTRMtx()[1][3];
+#if COS_WITH_COUCH_COOP
+        attention_info.position.y -= coop_charHeadDrop(this);
+#endif
     }
 }
 

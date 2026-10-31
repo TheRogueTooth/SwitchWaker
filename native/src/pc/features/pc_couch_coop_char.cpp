@@ -84,6 +84,7 @@ struct CharDef {
     const JointAttach* attach;
     const char* handL;
     const char* handR;
+    f32 handLExtend; // from handL along the bone, for a model with no left hand joint
     const char* chest;
     const char* waist;
     const char* hide;
@@ -93,17 +94,17 @@ struct CharDef {
 };
 
 const CharDef kChars[COOP_CHAR_COUNT] = {
-    {"Link", NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1.0f, 1.0f},
-    {"Medli", "Md", "CcMd", "md.bdl", "mdarm.bdl", kMedli, kMedliAttach, "handL", "handR", "backbone2", "waist", NULL,
+    {"Link", NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0.0f, NULL, NULL, NULL, 1.0f, 1.0f},
+    {"Medli", "Md", "CcMd", "md.bdl", "mdarm.bdl", kMedli, kMedliAttach, "handL", "handR", 0.0f, "backbone2", "waist", NULL,
      1.0f, 0.9f},
-    {"Makar", "Cb", "CcCb", "cb.bdl", "cb_face.bdl", kMakar, kMakarAttach, "armL2", "armRend", "backbone", "waist",
+    {"Makar", "Cb", "CcCb", "cb.bdl", "cb_face.bdl", kMakar, kMakarAttach, "armL2", "armRend", 6.5f, "backbone", "waist",
      NULL, 0.55f, 0.65f},
-    {"Prince Komali", "Co", "CcCo", "co.bdl", NULL, kAryllKomali, NULL, "handL", "handR", "backbone", "waist", NULL,
+    {"Prince Komali", "Co", "CcCo", "co.bdl", NULL, kAryllKomali, NULL, "handL", "handR", 0.0f, "backbone", "waist", NULL,
      0.85f, 0.85f},
-    {"Tetra", "Zl", "CcZl", "zl.bdl", NULL, kTetra, NULL, "zl_hand_l", "zl_hand_r", "chest", "waist", NULL, 1.0f, 1.0f},
-    {"Aryll", "Ls", "CcLs", "ls.bdl", "lshand.bdl", kAryllKomali, kAryllAttach, "handL", "handR", "backbone", "waist",
+    {"Tetra", "Zl", "CcZl", "zl.bdl", NULL, kTetra, NULL, "zl_hand_l", "zl_hand_r", 0.0f, "chest", "waist", NULL, 1.0f, 1.0f},
+    {"Aryll", "Ls", "CcLs", "ls.bdl", "lshand.bdl", kAryllKomali, kAryllAttach, "handL", "handR", 0.0f, "backbone", "waist",
      NULL, 0.8f, 0.8f},
-    {"Laruto", "Demo27", "CcZs", "zs.bdl", NULL, kLaruto, NULL, "handL", "handR", "backbone", "waist", "zs_harp", 1.25f,
+    {"Laruto", "Demo27", "CcZs", "zs.bdl", NULL, kLaruto, NULL, "handL", "handR", 0.0f, "backbone", "waist", "zs_harp", 1.25f,
      1.1f, true},
 };
 
@@ -131,6 +132,9 @@ struct CharInstance {
     int count = 0;
     int root = 0;
     int handL = -1, handR = -1, chest = -1;
+    int linkNeck = -1, linkHead = -1, linkEye = -1;
+    bool headMapped = false;
+    f32 headDrop = 0.0f;
     int linkHandL = -1, linkHandR = -1, linkChest = -1, linkCenter = -1, linkBack = -1, linkPod = -1;
     f32 linkCenterRest[3];
     f32 bodyScale = 1.0f;
@@ -423,9 +427,13 @@ bool createInstance(int slot, daPy_lk_c* player, int character) {
     inst.linkCenter = linkNames->getIndex("center");
     inst.linkBack = linkNames->getIndex("cl_back");
     inst.linkPod = linkNames->getIndex("cl_podA");
+    inst.linkNeck = linkNames->getIndex("neck_jnt");
+    inst.linkHead = linkNames->getIndex("head_jnt");
+    inst.linkEye = linkNames->getIndex("cl_eye");
     const int linkWaist = linkNames->getIndex("waist_jnt");
     if (inst.handL < 0 || inst.handR < 0 || inst.chest < 0 || waist < 0 || inst.linkHandL < 0 || inst.linkHandR < 0 ||
-        inst.linkChest < 0 || inst.linkCenter < 0 || inst.linkBack < 0 || inst.linkPod < 0 || linkWaist < 0) {
+        inst.linkChest < 0 || inst.linkCenter < 0 || inst.linkBack < 0 || inst.linkPod < 0 || linkWaist < 0 || inst.linkNeck < 0 || inst.linkHead < 0 ||
+        inst.linkEye < 0) {
         fprintf(stderr, "[coop] %s: missing a key joint\n", def.name);
         destroyInstance(slot);
         return false;
@@ -440,6 +448,16 @@ bool createInstance(int slot, daPy_lk_c* player, int character) {
     }
     // Hanging from a ledge or swimming, the hands stay where Link's are.
     inst.handDropY = linkRest[inst.linkHandL][1][3] - inst.joints[inst.handL].rest[1][3];
+    // A body with no head joint (Makar) carries things and is looked at from its chest.
+    inst.headMapped = false;
+    f32 headY = inst.joints[inst.chest].rest[1][3] + 10.0f;
+    for (int i = 0; i < inst.count; i++) {
+        if (inst.joints[i].link == inst.linkHead) {
+            inst.headMapped = true;
+            headY = inst.joints[i].rest[1][3];
+        }
+    }
+    inst.headDrop = linkRest[inst.linkHead][1][3] - headY;
     if (def.hide != NULL) {
         const int hide = bodyData->getJointName()->getIndex(def.hide);
         if (hide >= 0) {
@@ -519,8 +537,10 @@ void poseInstance(CharInstance& inst, daPy_lk_c* player) {
     // Back mounts (shield, sheath) keep their offset from the chest, scaled to the body.
     const MtxP linkChest = cl->getAnmMtx(inst.linkChest);
     f32 chestOld[3] = {linkChest[0][3], linkChest[1][3], linkChest[2][3]};
-    const int mounts[2] = {inst.linkBack, inst.linkPod};
-    for (int m = 0; m < 2; m++) {
+    const MtxP linkHead = cl->getAnmMtx(inst.linkHead);
+    const f32 headOld[3] = {linkHead[0][3], linkHead[1][3], linkHead[2][3]};
+    const int mounts[4] = {inst.linkBack, inst.linkPod, inst.linkNeck, inst.linkHead};
+    for (int m = 0; m < (inst.headMapped ? 2 : 4); m++) {
         MtxP mount = cl->getAnmMtx(mounts[m]);
         for (int r = 0; r < 3; r++) {
             mount[r][3] = inst.anim[inst.chest][r][3] + (mount[r][3] - chestOld[r]) * def.itemScale;
@@ -535,6 +555,18 @@ void poseInstance(CharInstance& inst, daPy_lk_c* player) {
             }
         }
     }
+    if (!inst.headMapped) {
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
+                linkHead[r][c] *= def.itemScale; // the head top is measured along this matrix
+            }
+        }
+    }
+    // The eyes are what enemies aim at and voices play from.
+    MtxP eye = cl->getAnmMtx(inst.linkEye);
+    for (int r = 0; r < 3; r++) {
+        eye[r][3] = linkHead[r][3] + (eye[r][3] - headOld[r]) * def.itemScale;
+    }
     // Items are held at the character's hands, scaled through the hand's matrix.
     const int handTarget[2] = {inst.handL, inst.handR};
     const int handLink[2] = {inst.linkHandL, inst.linkHandR};
@@ -545,6 +577,9 @@ void poseInstance(CharInstance& inst, daPy_lk_c* player) {
             m[r][1] *= def.itemScale;
             m[r][2] *= def.itemScale;
             m[r][3] = inst.anim[handTarget[h]][r][3];
+            if (h == 0) {
+                m[r][3] += inst.anim[handTarget[h]][r][0] * def.handLExtend;
+            }
         }
     }
     inst.model[0]->setBaseTRMtx(const_cast<MtxP>(base));
@@ -596,6 +631,10 @@ J3DModel* coop_charShadowModel(daPy_lk_c* player, J3DModel* linkModel) {
 
 f32 coop_charRadiusScale(const daPy_lk_c* player) {
     return kChars[sInstance[slotOf(player)].def].radiusScale;
+}
+
+f32 coop_charHeadDrop(const daPy_lk_c* player) {
+    return sInstance[slotOf(player)].def != 0 ? sInstance[slotOf(player)].headDrop : 0.0f;
 }
 
 void coop_charOnPlayerDelete(daPy_lk_c* player) {

@@ -1682,6 +1682,9 @@ bool mDoGph_Painter() {
                 coop_splitViewport(coopView, &coopPort.mXOrig, &coopPort.mWidth);
                 viewport_p = &coopPort;
             }
+            // The last half advances the paint-time state (line buffers, sea, weather), as a
+            // single paint would; the first only draws.
+            pc_paint_extra_set(coopSplit && coopView == 0);
 #endif
             GXSetViewport(viewport_p->mXOrig, viewport_p->mYOrig, viewport_p->mWidth, viewport_p->mHeight, viewport_p->mNearZ, viewport_p->mFarZ);
             GXSetScissor(viewport_p->mXOrig, viewport_p->mYOrig, viewport_p->mWidth, viewport_p->mHeight);
@@ -1711,7 +1714,7 @@ bool mDoGph_Painter() {
 #if COS_WITH_COUCH_COOP
             if (coopView == 1) {
                 coop_paintDeltaOn(&camera->view);
-            } else
+            } else if (!coopSplit)
 #endif
             pc_fps60_view_begin(&camera->view);
 #endif
@@ -1887,11 +1890,13 @@ bool mDoGph_Painter() {
                     if (coopView == 0) {
                         // Player 2's half: the same lists again, seen from their camera.
                         coopView = 1;
-                        pc_paint_extra_set(1);
+                        j3dSys.drawInit();
+                        GXSetAlphaUpdate(GX_FALSE);
+                        GXSetDither(GX_TRUE);
+                        GXSetNumIndStages(0);
                         goto coopPaintView;
                     }
                     coop_paintDeltaOff();
-                    pc_paint_extra_set(0);
                     GXSetViewport(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 1.0f);
                     GXSetScissor(0, 0, 640, 480);
                     GXSetProjection(camera->view.mProjMtx, GX_PERSPECTIVE);
