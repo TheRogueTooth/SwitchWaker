@@ -31,7 +31,7 @@
 #include "pc/pc_settings.h"
 #include <dolphin/gx/GXAurora.h>
 
-#include <aurora/aurora.h>
+#include <aurora/gfx.h>
 #include <imgui.h>
 
 #include <cstdio>
